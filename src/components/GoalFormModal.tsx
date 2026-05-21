@@ -571,7 +571,9 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                 <label style={{ fontSize: '0.8rem', color: 'var(--text-med)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                   Difficulté Perçue
-                  <HelpCircle size={12} title="Votre sensation d'effort sur une échelle de 1 à 5." />
+                  <span title="Votre sensation d'effort sur une échelle de 1 à 5." style={{ display: 'inline-flex', alignItems: 'center', cursor: 'help' }}>
+                    <HelpCircle size={12} />
+                  </span>
                 </label>
                 <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-warning)' }}>{perceivedDifficulty} / 5</span>
               </div>
