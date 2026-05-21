@@ -229,6 +229,9 @@ ul, ol {
 
 /* Responsive adjustments */
 @media (max-width: 1024px) {
+  .sidebar {
+    display: none !important;
+  }
   .main-content {
     margin-left: 0;
     padding: 24px;

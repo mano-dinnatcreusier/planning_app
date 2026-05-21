@@ -26,7 +26,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
-      className="glass"
+      className="sidebar glass"
       style={{
         width: 'var(--sidebar-width)',
         position: 'fixed',
