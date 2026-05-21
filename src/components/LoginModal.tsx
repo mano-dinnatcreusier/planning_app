@@ -63,6 +63,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onClose }) => {
         setErrorMsg("Nom d'utilisateur ou mot de passe incorrect.");
       } else if (msg.includes("User already registered")) {
         setErrorMsg("Ce nom d'utilisateur est déjà pris.");
+      } else if (msg.toLowerCase().includes("invalid") && msg.toLowerCase().includes("email")) {
+        setErrorMsg("Adresse e-mail rejetée par Supabase. Assurez-vous d'avoir désactivé l'option 'Confirm email' dans vos paramètres Supabase (Dashboard > Authentication > Providers > Email > Confirm email) pour permettre la création de comptes de démonstration instantanés.");
       } else {
         setErrorMsg(msg);
       }
