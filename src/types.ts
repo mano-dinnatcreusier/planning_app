@@ -18,6 +18,7 @@ export interface FinalGoal {
   points_relative?: number;
   user_start_context?: string;
   ai_explanation?: string;
+  user_id?: string;
 }
 
 export interface Milestone {
@@ -70,6 +71,7 @@ export interface Habit {
   custom_days_per_week?: number;
   goal_ids: string[];
   created_at: string;
+  user_id?: string;
 }
 
 export interface HabitLog {

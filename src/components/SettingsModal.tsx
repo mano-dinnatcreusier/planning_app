@@ -74,7 +74,19 @@ ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS est_hours INTEGER DEFAULT
 ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS perceived_difficulty INTEGER DEFAULT 3;
 ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS points_absolute INTEGER DEFAULT 30;
 ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS points_relative INTEGER DEFAULT 30;
-ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high'));`;
+ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high'));
+
+-- Ajouter le support multi-utilisateurs (Système de Connexion)
+ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS user_id UUID;
+ALTER TABLE public.habits ADD COLUMN IF NOT EXISTS user_id UUID;
+
+-- Créer la table des profils utilisateurs
+CREATE TABLE IF NOT EXISTS public.user_profiles (
+    user_id UUID PRIMARY KEY,
+    ai_api_key TEXT,
+    ai_model TEXT DEFAULT 'deepseek-chat',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL
+);`;
 
     navigator.clipboard.writeText(sql);
     setCopiedMigration(true);
@@ -99,7 +111,8 @@ CREATE TABLE final_goals (
     points_absolute INTEGER DEFAULT 150,
     points_relative INTEGER DEFAULT 150,
     user_start_context TEXT,
-    ai_explanation TEXT
+    ai_explanation TEXT,
+    user_id UUID
 );
 
 -- Table des Jalons (Milestones)
@@ -140,7 +153,8 @@ CREATE TABLE IF NOT EXISTS habits (
     frequency_type TEXT NOT NULL CHECK (frequency_type IN ('daily', 'weekly', 'custom')),
     custom_days_per_week INTEGER,
     goal_ids TEXT[] DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
+    user_id UUID
 );
 
 -- Table des logs de validation d'habitudes
@@ -149,6 +163,14 @@ CREATE TABLE IF NOT EXISTS habit_logs (
     date DATE NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('done', 'missed')),
     PRIMARY KEY (habit_id, date)
+);
+
+-- Table des profils utilisateurs (IA configuration cloud)
+CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id UUID PRIMARY KEY,
+    ai_api_key TEXT,
+    ai_model TEXT DEFAULT 'deepseek-chat',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL
 );`;
 
     navigator.clipboard.writeText(sql);

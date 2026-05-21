@@ -8,6 +8,7 @@ interface SidebarProps {
   selectedGoalId: string | null;
   setSelectedGoalId: (id: string | null) => void;
   openSettings: () => void;
+  openLogin: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -15,9 +16,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab,
   selectedGoalId,
   setSelectedGoalId,
-  openSettings
+  openSettings,
+  openLogin
 }) => {
-  const { finalGoals, isSupabaseConnected } = useGoals();
+  const { finalGoals, isSupabaseConnected, user, logout } = useGoals();
 
   const handleGoalClick = (goalId: string) => {
     setSelectedGoalId(goalId);
@@ -303,10 +305,97 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {/* Bottom section: Supabase Status & Settings */}
-      <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
+      {/* Bottom section: Supabase Status, User Profile & Settings */}
+      <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border-color)', paddingTop: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {/* User Account / Login State */}
+        {user ? (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            backgroundColor: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--border-radius-md)',
+            padding: '12px 14px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                textTransform: 'capitalize'
+              }}>
+                {user.email ? user.email.split('@')[0][0] : 'U'}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#ffffff', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                  {user.email ? user.email.split('@')[0] : 'Utilisateur'}
+                </span>
+                <span style={{ fontSize: '0.65rem', color: 'var(--text-low)' }}>
+                  Compte Cloud actif
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={logout}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#fb7185',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                textAlign: 'left',
+                padding: '4px 0',
+                transition: 'var(--transition-fast)'
+              }}
+              onMouseOver={(e) => { e.currentTarget.style.color = '#fb516c'; }}
+              onMouseOut={(e) => { e.currentTarget.style.color = '#fb7185'; }}
+            >
+              Se déconnecter
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={openLogin}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              padding: '10px 14px',
+              borderRadius: 'var(--border-radius-md)',
+              border: '1px solid rgba(168, 85, 247, 0.4)',
+              backgroundColor: 'rgba(168, 85, 247, 0.05)',
+              color: '#ffffff',
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'var(--transition-fast)'
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(168, 85, 247, 0.15)';
+              e.currentTarget.style.boxShadow = 'var(--shadow-neon-primary)';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(168, 85, 247, 0.05)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <Sparkles size={14} style={{ color: 'var(--accent-secondary)' }} />
+            Se Connecter / S'inscrire
+          </button>
+        )}
+
         {/* Supabase status indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '0 8px 16px 8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '0 8px' }}>
           <div style={{
             width: '8px',
             height: '8px',

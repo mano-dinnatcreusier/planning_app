@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { FinalGoal, Milestone, Subtask, AiConfig, Habit, HabitLog } from '../types';
 import { getSupabase, initSupabaseClient, getSupabaseConfig } from '../utils/supabaseClient';
 import { getAiConfig, saveAiConfigInStorage } from '../utils/aiClient';
+import type { User } from '@supabase/supabase-js';
 
 interface GoalContextType {
   finalGoals: FinalGoal[];
@@ -13,6 +14,10 @@ interface GoalContextType {
   isSupabaseConnected: boolean;
   supabaseConfig: { url: string; anonKey: string };
   aiConfig: AiConfig;
+  user: User | null;
+  login: (username: string, password: string) => Promise<void>;
+  signup: (username: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
   // Final Goals CRUD
   addFinalGoal: (title: string, description: string, difficulty: number, targetDate: string, scoringFields?: Partial<FinalGoal>) => Promise<string>;
   updateFinalGoal: (id: string, updates: Partial<FinalGoal>) => Promise<void>;
@@ -42,6 +47,7 @@ interface GoalContextType {
 const GoalContext = createContext<GoalContextType | undefined>(undefined);
 
 export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
   const [finalGoals, setFinalGoals] = useState<FinalGoal[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
@@ -73,36 +79,124 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { points_absolute, points_relative };
   };
 
-  // Check connection status
+  // Check connection status & retrieve session
   useEffect(() => {
     const supabase = getSupabase();
     setIsSupabaseConnected(!!supabase);
-    loadAllData();
+    
+    if (supabase) {
+      // Get initial session
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setUser(session?.user ?? null);
+      });
+
+      // Listen to auth changes
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        setUser(session?.user ?? null);
+      });
+
+      return () => subscription.unsubscribe();
+    }
   }, [supabaseConfig.url, supabaseConfig.anonKey]);
+
+  // Load data when connection or user state changes
+  useEffect(() => {
+    loadAllData();
+  }, [isSupabaseConnected, user]);
 
   // Read data
   const loadAllData = async () => {
     setLoading(true);
     const supabase = getSupabase();
 
-    if (supabase) {
+    if (supabase && user) {
       try {
-        // Fetch from Supabase
-        const { data: fgData, error: fgErr } = await supabase.from('final_goals').select('*').order('created_at', { ascending: false });
-        const { data: msData, error: msErr } = await supabase.from('milestones').select('*').order('order_index', { ascending: true });
-        const { data: stData, error: stErr } = await supabase.from('subtasks').select('*').order('order_index', { ascending: true });
-        const { data: hbData, error: hbErr } = await supabase.from('habits').select('*').order('created_at', { ascending: false });
-        const { data: hblData, error: hblErr } = await supabase.from('habit_logs').select('*');
+        const userId = user.id;
 
-        if (fgErr || msErr || stErr || hbErr || hblErr) {
+        // Load deepseek settings from cloud profile
+        try {
+          const { data: profileData } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+          if (profileData) {
+            const loadedAiConfig = {
+              url: 'https://api.deepseek.com/v1',
+              apiKey: profileData.ai_api_key || '',
+              model: profileData.ai_model || 'deepseek-chat'
+            };
+            setAiConfig(loadedAiConfig);
+            saveAiConfigInStorage(loadedAiConfig);
+          }
+        } catch (profileErr) {
+          console.warn("User profile loading failed:", profileErr);
+        }
+
+        // Fetch from Supabase cloud (user-filtered)
+        const { data: fgData, error: fgErr } = await supabase
+          .from('final_goals')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false });
+
+        const { data: hbData, error: hbErr } = await supabase
+          .from('habits')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false });
+
+        if (fgErr || hbErr) {
           throw new Error('Supabase fetch error');
         }
 
-        setFinalGoals(fgData || []);
-        setMilestones(msData || []);
-        setSubtasks(stData || []);
-        setHabits(hbData || []);
-        setHabitLogs(hblData || []);
+        const validFgData = fgData || [];
+        const validHbData = hbData || [];
+
+        // Fetch Milestones
+        let msData: Milestone[] = [];
+        const goalIds = validFgData.map(g => g.id);
+        if (goalIds.length > 0) {
+          const { data, error } = await supabase
+            .from('milestones')
+            .select('*')
+            .in('final_goal_id', goalIds)
+            .order('order_index', { ascending: true });
+          if (error) throw error;
+          msData = data || [];
+        }
+
+        // Fetch Subtasks
+        let stData: Subtask[] = [];
+        const msIds = msData.map(m => m.id);
+        if (msIds.length > 0) {
+          const { data, error } = await supabase
+            .from('subtasks')
+            .select('*')
+            .in('milestone_id', msIds)
+            .order('order_index', { ascending: true });
+          if (error) throw error;
+          stData = data || [];
+        }
+
+        // Fetch Habit Logs
+        let hblData: HabitLog[] = [];
+        const hbIds = validHbData.map(h => h.id);
+        if (hbIds.length > 0) {
+          const { data, error } = await supabase
+            .from('habit_logs')
+            .select('*')
+            .in('habit_id', hbIds);
+          if (error) throw error;
+          hblData = data || [];
+        }
+
+        setFinalGoals(validFgData);
+        setMilestones(msData);
+        setSubtasks(stData);
+        setHabits(validHbData);
+        setHabitLogs(hblData);
       } catch (err) {
         console.error('Supabase failed, falling back to LocalStorage', err);
         loadFromLocalStorage();
@@ -111,6 +205,65 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       loadFromLocalStorage();
     }
     setLoading(false);
+  };
+
+  // Auth Operations
+  const login = async (username: string, password: string) => {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error("Base de données non configurée.");
+
+    const email = `${username.trim().toLowerCase()}@planning.app`;
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (error) throw error;
+    setUser(data.user);
+  };
+
+  const signup = async (username: string, password: string) => {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error("Base de données non configurée.");
+
+    const email = `${username.trim().toLowerCase()}@planning.app`;
+    
+    // Sign up user
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password
+    });
+
+    if (error) throw error;
+    if (!data.user) throw new Error("Erreur lors de la création de l'utilisateur.");
+
+    // Create user profile in profiles table
+    try {
+      await supabase
+        .from('user_profiles')
+        .insert({
+          user_id: data.user.id,
+          ai_api_key: '',
+          ai_model: 'deepseek-chat'
+        });
+    } catch (profileErr) {
+      console.warn("Could not create initial user profile in DB:", profileErr);
+    }
+
+    setUser(data.user);
+  };
+
+  const logout = async () => {
+    const supabase = getSupabase();
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    setUser(null);
+    setFinalGoals([]);
+    setMilestones([]);
+    setSubtasks([]);
+    setHabits([]);
+    setHabitLogs([]);
   };
 
   const loadFromLocalStorage = () => {
@@ -221,7 +374,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       created_at: new Date().toISOString(),
       ...baseGoal,
       points_absolute,
-      points_relative
+      points_relative,
+      user_id: user?.id
     };
 
     const supabase = getSupabase();
@@ -739,7 +893,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const newHabit: Habit = {
       id: crypto.randomUUID(),
       created_at: new Date().toISOString(),
-      ...habitData
+      ...habitData,
+      user_id: user?.id
     };
     const supabase = getSupabase();
     if (supabase) {
@@ -815,6 +970,10 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isSupabaseConnected,
         supabaseConfig,
         aiConfig,
+        user,
+        login,
+        signup,
+        logout,
         addFinalGoal,
         updateFinalGoal,
         updateFinalGoalDate,

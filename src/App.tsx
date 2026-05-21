@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { GoalProvider } from './context/GoalContext';
+import React, { useState, useEffect } from 'react';
+import { GoalProvider, useGoals } from './context/GoalContext';
 import { Sidebar } from './components/Sidebar';
 import { MobileNav } from './components/MobileNav';
 import { Dashboard } from './components/Dashboard';
@@ -8,16 +8,26 @@ import { GoalCalendar } from './components/GoalCalendar';
 import { HabitsView } from './components/HabitsView';
 import { SettingsModal } from './components/SettingsModal';
 import { GoalFormModal } from './components/GoalFormModal';
+import { LoginModal } from './components/LoginModal';
 import type { FinalGoal, Milestone } from './types';
 
 // Core component wrapped in provider
 const MainApp: React.FC = () => {
+  const { user, loading } = useGoals();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'timeline' | 'calendar' | 'habits'>('dashboard');
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   
   // Modals visibility states
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
+
+  // Auto prompt login if not connected on initial load
+  useEffect(() => {
+    if (!loading && !user) {
+      setIsLoginOpen(true);
+    }
+  }, [user, loading]);
   
   // Form settings configuration
   const [formType, setFormType] = useState<'goal' | 'milestone'>('goal');
@@ -72,6 +82,7 @@ const MainApp: React.FC = () => {
         selectedGoalId={selectedGoalId}
         setSelectedGoalId={setSelectedGoalId}
         openSettings={() => setIsSettingsOpen(true)}
+        openLogin={() => setIsLoginOpen(true)}
       />
 
       {/* 2. Floating Mobile Nav */}
@@ -126,6 +137,11 @@ const MainApp: React.FC = () => {
         milestoneToEdit={milestoneToEdit}
         parentId={formParentId}
       />
+
+      {/* 6. Global Auth Login / Signup Modal */}
+      {isLoginOpen && (
+        <LoginModal onClose={() => setIsLoginOpen(false)} />
+      )}
     </div>
   );
 };
