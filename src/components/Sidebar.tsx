@@ -1,10 +1,10 @@
 import React from 'react';
 import { useGoals } from '../context/GoalContext';
-import { LayoutDashboard, CalendarRange, Database, Trophy, Sparkles } from 'lucide-react';
+import { LayoutDashboard, CalendarRange, Database, Trophy, Sparkles, CalendarDays } from 'lucide-react';
 
 interface SidebarProps {
-  activeTab: 'dashboard' | 'timeline';
-  setActiveTab: (tab: 'dashboard' | 'timeline') => void;
+  activeTab: 'dashboard' | 'timeline' | 'calendar';
+  setActiveTab: (tab: 'dashboard' | 'timeline' | 'calendar') => void;
   selectedGoalId: string | null;
   setSelectedGoalId: (id: string | null) => void;
   openSettings: () => void;
@@ -141,6 +141,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           <CalendarRange size={18} />
           Vue Chronologique
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('calendar');
+            setSelectedGoalId(null);
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '12px 16px',
+            borderRadius: 'var(--border-radius-md)',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+            fontWeight: 500,
+            transition: 'var(--transition-fast)',
+            textAlign: 'left',
+            width: '100%',
+            backgroundColor: activeTab === 'calendar' ? 'rgba(168, 85, 247, 0.08)' : 'transparent',
+            color: activeTab === 'calendar' ? 'var(--accent-primary)' : 'var(--text-med)',
+            borderLeft: activeTab === 'calendar' ? '3px solid var(--accent-primary)' : '3px solid transparent'
+          }}
+          onMouseOver={(e) => {
+            if (activeTab !== 'calendar') {
+              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+              e.currentTarget.style.color = 'var(--text-high)';
+            }
+          }}
+          onMouseOut={(e) => {
+            if (activeTab !== 'calendar') {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--text-med)';
+            }
+          }}
+        >
+          <CalendarDays size={18} />
+          Calendrier Planif
         </button>
       </div>
 

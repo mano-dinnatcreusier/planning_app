@@ -14,10 +14,12 @@ interface GoalContextType {
   // Final Goals CRUD
   addFinalGoal: (title: string, description: string, difficulty: number, targetDate: string, scoringFields?: Partial<FinalGoal>) => Promise<string>;
   updateFinalGoal: (id: string, updates: Partial<FinalGoal>) => Promise<void>;
+  updateFinalGoalDate: (id: string, date: string) => Promise<void>;
   deleteFinalGoal: (id: string) => Promise<void>;
   // Milestones CRUD
   addMilestone: (finalGoalId: string, title: string, description: string, difficulty: number, targetDate: string, scoringFields?: Partial<Milestone>) => Promise<string>;
   updateMilestone: (id: string, updates: Partial<Milestone>) => Promise<void>;
+  updateMilestoneDate: (id: string, date: string) => Promise<void>;
   deleteMilestone: (id: string) => Promise<void>;
   reorderMilestones: (finalGoalId: string, orderedMilestoneIds: string[]) => Promise<void>;
   // Subtasks CRUD
@@ -183,6 +185,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       coeff_personal: 1.0,
       user_start_context: '',
       ai_explanation: '',
+      priority: 'medium',
       ...scoringFields
     };
     const { points_absolute, points_relative } = calculateFinalGoalPoints(baseGoal);
@@ -279,6 +282,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const baseMs: Partial<Milestone> = {
       est_hours: 2,
       perceived_difficulty: difficulty,
+      priority: 'medium',
       ...scoringFields
     };
     const { points_absolute, points_relative } = calculateMilestonePoints(baseMs, parentGoal);
@@ -541,7 +545,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         difficulty: 5,
         target_date: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 6 mois
         status: 'in_progress',
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        priority: 'high'
       },
       {
         id: g2_id,
@@ -550,7 +555,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         difficulty: 4,
         target_date: new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 4 mois
         status: 'pending',
-        created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
+        created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        priority: 'medium'
       }
     ];
 
@@ -571,7 +577,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         order_index: 0,
         target_date: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         status: 'completed',
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        priority: 'medium'
       },
       {
         id: m2_id,
@@ -582,7 +589,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         order_index: 1,
         target_date: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         status: 'in_progress',
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        priority: 'high'
       },
       {
         id: m3_id,
@@ -593,7 +601,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         order_index: 2,
         target_date: new Date(Date.now() + 75 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         status: 'pending',
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        priority: 'medium'
       },
       {
         id: m4_id,
@@ -604,7 +613,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         order_index: 0,
         target_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         status: 'in_progress',
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        priority: 'medium'
       },
       {
         id: m5_id,
@@ -615,7 +625,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         order_index: 1,
         target_date: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         status: 'pending',
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        priority: 'high'
       }
     ];
 
@@ -676,6 +687,32 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAiConfig(config);
   };
 
+  const updateFinalGoalDate = async (id: string, date: string) => {
+    const supabase = getSupabase();
+    if (supabase) {
+      const { error } = await supabase.from('final_goals').update({ target_date: date }).eq('id', id);
+      if (error) throw error;
+      setFinalGoals(prev => prev.map(g => g.id === id ? { ...g, target_date: date } : g));
+    } else {
+      const nextGoals = finalGoals.map(g => g.id === id ? { ...g, target_date: date } : g);
+      setFinalGoals(nextGoals);
+      syncToLocalStorage(nextGoals, milestones, subtasks);
+    }
+  };
+
+  const updateMilestoneDate = async (id: string, date: string) => {
+    const supabase = getSupabase();
+    if (supabase) {
+      const { error } = await supabase.from('milestones').update({ target_date: date }).eq('id', id);
+      if (error) throw error;
+      setMilestones(prev => prev.map(m => m.id === id ? { ...m, target_date: date } : m));
+    } else {
+      const nextMs = milestones.map(m => m.id === id ? { ...m, target_date: date } : m);
+      setMilestones(nextMs);
+      syncToLocalStorage(finalGoals, nextMs, subtasks);
+    }
+  };
+
   return (
     <GoalContext.Provider
       value={{
@@ -688,9 +725,11 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         aiConfig,
         addFinalGoal,
         updateFinalGoal,
+        updateFinalGoalDate,
         deleteFinalGoal,
         addMilestone,
         updateMilestone,
+        updateMilestoneDate,
         deleteMilestone,
         reorderMilestones,
         addSubtask,

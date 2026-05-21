@@ -20,7 +20,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const { finalGoals, milestones, subtasks, deleteFinalGoal, loading, loadDemoData } = useGoals();
 
   const [searchQuery, setSearchQuery] = React.useState('');
-  const [sortBy, setSortBy] = React.useState<'date_asc' | 'date_desc' | 'points_abs' | 'points_rel' | 'progress'>('date_asc');
+  const [sortBy, setSortBy] = React.useState<'date_asc' | 'date_desc' | 'points_abs' | 'points_rel' | 'progress' | 'priority'>('date_asc');
 
   const handleFocusGoal = (goalId: string) => {
     setSelectedGoalId(goalId);
@@ -93,6 +93,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
       if (sortBy === 'progress') {
         return (b.progress || 0) - (a.progress || 0);
+      }
+      if (sortBy === 'priority') {
+        const rank = (p?: string) => {
+          if (p === 'high') return 3;
+          if (p === 'low') return 1;
+          return 2;
+        };
+        return rank(b.priority) - rank(a.priority);
       }
       return 0;
     });
@@ -436,6 +444,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <option value="points_abs">🏆 Points Absolus (XP Max)</option>
               <option value="points_rel">👤 Points Relatifs (XP Max)</option>
               <option value="progress">📈 Progression (Max)</option>
+              <option value="priority">🔥 Priorité (Haute à Basse)</option>
             </select>
           </div>
         </div>
@@ -582,6 +591,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             border: '1px solid rgba(6, 182, 212, 0.15)'
                           }} title="Points XP Relatifs (Ajustés à votre situation)">
                             {goal.points_relative} XP Rel.
+                          </span>
+                        )}
+
+                        {goal.priority && (
+                          <span style={{
+                            fontSize: '0.62rem',
+                            fontWeight: 800,
+                            backgroundColor: 
+                              goal.priority === 'high' ? 'rgba(244, 63, 94, 0.12)' : 
+                              goal.priority === 'low' ? 'rgba(56, 189, 248, 0.12)' : 
+                              'rgba(234, 179, 8, 0.12)',
+                            color: 
+                              goal.priority === 'high' ? '#f43f5e' : 
+                              goal.priority === 'low' ? '#38bdf8' : 
+                              'var(--accent-warning)',
+                            padding: '2px 8px',
+                            borderRadius: '10px',
+                            border: '1px solid ' + (
+                              goal.priority === 'high' ? 'rgba(244, 63, 94, 0.2)' : 
+                              goal.priority === 'low' ? 'rgba(56, 189, 248, 0.2)' : 
+                              'rgba(234, 179, 8, 0.2)'
+                            )
+                          }}>
+                            {goal.priority === 'high' ? '🔥 Haute' : goal.priority === 'low' ? '❄️ Basse' : '⚡ Moyenne'}
                           </span>
                         )}
                       </div>

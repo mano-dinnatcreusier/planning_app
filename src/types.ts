@@ -7,6 +7,7 @@ export interface FinalGoal {
   status: 'pending' | 'in_progress' | 'completed';
   created_at: string;
   progress?: number; // Calculated dynamic field (0-100)
+  priority?: 'low' | 'medium' | 'high';
   
   // Points System Fields
   est_hours?: number;
@@ -30,6 +31,7 @@ export interface Milestone {
   status: 'pending' | 'in_progress' | 'completed';
   created_at: string;
   progress?: number; // Calculated dynamic field (0-100)
+  priority?: 'low' | 'medium' | 'high';
 
   // Points System Fields (calculated or inherited)
   est_hours?: number;

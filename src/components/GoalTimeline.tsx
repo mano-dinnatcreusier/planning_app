@@ -159,6 +159,29 @@ export const GoalTimeline: React.FC<GoalTimelineProps> = ({
                   {activeGoal.points_relative} XP Rel.
                 </span>
               )}
+              {activeGoal.priority && (
+                <span style={{
+                  fontSize: '0.65rem',
+                  fontWeight: 800,
+                  backgroundColor: 
+                    activeGoal.priority === 'high' ? 'rgba(244, 63, 94, 0.12)' : 
+                    activeGoal.priority === 'low' ? 'rgba(56, 189, 248, 0.12)' : 
+                    'rgba(234, 179, 8, 0.12)',
+                  color: 
+                    activeGoal.priority === 'high' ? '#f43f5e' : 
+                    activeGoal.priority === 'low' ? '#38bdf8' : 
+                    'var(--accent-warning)',
+                  padding: '2px 8px',
+                  borderRadius: '10px',
+                  border: '1px solid ' + (
+                    activeGoal.priority === 'high' ? 'rgba(244, 63, 94, 0.2)' : 
+                    activeGoal.priority === 'low' ? 'rgba(56, 189, 248, 0.2)' : 
+                    'rgba(234, 179, 8, 0.2)'
+                  )
+                }}>
+                  {activeGoal.priority === 'high' ? '🔥 Haute' : activeGoal.priority === 'low' ? '❄️ Basse' : '⚡ Moyenne'}
+                </span>
+              )}
             </div>
             <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>{activeGoal.title}</h2>
             <p style={{ color: 'var(--text-med)', fontSize: '0.88rem', marginTop: '6px', maxWidth: '800px', lineHeight: 1.4 }}>
@@ -367,6 +390,29 @@ export const GoalTimeline: React.FC<GoalTimelineProps> = ({
                               border: '1px solid rgba(6, 182, 212, 0.12)'
                             }} title="Points XP Relatifs (Ajustés à votre profil)">
                               {ms.points_relative} XP Rel.
+                            </span>
+                          )}
+                          {ms.priority && (
+                            <span style={{
+                              fontSize: '0.62rem',
+                              fontWeight: 800,
+                              backgroundColor: 
+                                ms.priority === 'high' ? 'rgba(244, 63, 94, 0.12)' : 
+                                ms.priority === 'low' ? 'rgba(56, 189, 248, 0.12)' : 
+                                'rgba(234, 179, 8, 0.12)',
+                              color: 
+                                ms.priority === 'high' ? '#f43f5e' : 
+                                ms.priority === 'low' ? '#38bdf8' : 
+                                'var(--accent-warning)',
+                              padding: '1px 6px',
+                              borderRadius: '8px',
+                              border: '1px solid ' + (
+                                ms.priority === 'high' ? 'rgba(244, 63, 94, 0.15)' : 
+                                ms.priority === 'low' ? 'rgba(56, 189, 248, 0.15)' : 
+                                'rgba(234, 179, 8, 0.15)'
+                              )
+                            }}>
+                              {ms.priority === 'high' ? '🔥 Haute' : ms.priority === 'low' ? '❄️ Basse' : '⚡ Moyenne'}
                             </span>
                           )}
                         </div>

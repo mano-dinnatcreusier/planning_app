@@ -29,6 +29,7 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
   const [description, setDescription] = useState('');
   const [difficulty, setDifficulty] = useState(3);
   const [targetDate, setTargetDate] = useState('');
+  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -53,6 +54,7 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
           setDescription(goalToEdit.description);
           setDifficulty(goalToEdit.difficulty);
           setTargetDate(goalToEdit.target_date);
+          setPriority(goalToEdit.priority ?? 'medium');
           setEstHours(goalToEdit.est_hours ?? 10);
           setPerceivedDifficulty(goalToEdit.perceived_difficulty ?? goalToEdit.difficulty);
           setCoeffPublic(goalToEdit.coeff_public ?? 1.5);
@@ -65,6 +67,7 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
           setDescription(milestoneToEdit.description);
           setDifficulty(milestoneToEdit.difficulty);
           setTargetDate(milestoneToEdit.target_date);
+          setPriority(milestoneToEdit.priority ?? 'medium');
           setEstHours(milestoneToEdit.est_hours ?? 2);
           setPerceivedDifficulty(milestoneToEdit.perceived_difficulty ?? milestoneToEdit.difficulty);
           setGeneratedSubtaskTitles([]);
@@ -77,6 +80,7 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
         const defaultDate = new Date();
         defaultDate.setDate(defaultDate.getDate() + 30); // 30 days from now default
         setTargetDate(defaultDate.toISOString().split('T')[0]);
+        setPriority('medium');
         setEstHours(type === 'goal' ? 10 : 2);
         setPerceivedDifficulty(3);
         setCoeffPublic(1.5);
@@ -112,7 +116,8 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
             coeff_public: coeffPublic,
             coeff_personal: coeffPersonal,
             user_start_context: userStartContext,
-            ai_explanation: aiExplanation
+            ai_explanation: aiExplanation,
+            priority
           });
         } else if (mode === 'edit' && goalToEdit) {
           await updateFinalGoal(goalToEdit.id, {
@@ -125,14 +130,16 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
             coeff_public: coeffPublic,
             coeff_personal: coeffPersonal,
             user_start_context: userStartContext,
-            ai_explanation: aiExplanation
+            ai_explanation: aiExplanation,
+            priority
           });
         }
       } else if (type === 'milestone') {
         if (mode === 'create' && parentId) {
           const msId = await addMilestone(parentId, trimmedTitle, description, difficulty, targetDate, {
             est_hours: estHours,
-            perceived_difficulty: perceivedDifficulty
+            perceived_difficulty: perceivedDifficulty,
+            priority
           });
           // Auto create suggested subtasks
           if (generatedSubtaskTitles.length > 0) {
@@ -147,7 +154,8 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
             difficulty,
             target_date: targetDate,
             est_hours: estHours,
-            perceived_difficulty: perceivedDifficulty
+            perceived_difficulty: perceivedDifficulty,
+            priority
           });
         }
       }
@@ -325,6 +333,75 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
                   color: '#ffffff'
                 }}
               />
+            </div>
+          </div>
+
+          {/* Niveau de Priorité */}
+          <div>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-med)', marginBottom: '8px' }}>
+              Niveau de Priorité
+            </label>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr 1fr',
+              gap: '10px',
+              backgroundColor: 'rgba(255, 255, 255, 0.02)',
+              padding: '6px',
+              borderRadius: 'var(--border-radius-md)',
+              border: '1px solid var(--border-color)'
+            }}>
+              {(['low', 'medium', 'high'] as const).map((p) => {
+                const isSelected = priority === p;
+                const label = p === 'low' ? '❄️ Basse' : p === 'medium' ? '⚡ Moyenne' : '🔥 Haute';
+                
+                const activeColor = 
+                  p === 'low' ? '#38bdf8' : 
+                  p === 'medium' ? 'var(--accent-warning)' : 
+                  'var(--accent-danger)';
+                
+                const activeBg = 
+                  p === 'low' ? 'rgba(56, 189, 248, 0.12)' : 
+                  p === 'medium' ? 'rgba(234, 179, 8, 0.12)' : 
+                  'rgba(244, 63, 94, 0.12)';
+
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPriority(p)}
+                    style={{
+                      padding: '10px',
+                      borderRadius: 'var(--border-radius-sm)',
+                      border: '1px solid ' + (isSelected ? activeColor : 'transparent'),
+                      backgroundColor: isSelected ? activeBg : 'transparent',
+                      color: isSelected ? '#ffffff' : 'var(--text-med)',
+                      cursor: 'pointer',
+                      fontSize: '0.85rem',
+                      fontWeight: isSelected ? 700 : 500,
+                      transition: 'var(--transition-fast)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      boxShadow: isSelected ? `0 0 10px ${activeBg}` : 'none'
+                    }}
+                    onMouseOver={(e) => {
+                      if (!isSelected) {
+                        e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                        e.currentTarget.style.color = 'var(--text-high)';
+                      }
+                    }}
+                    onMouseOut={(e) => {
+                      if (!isSelected) {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = 'var(--text-med)';
+                      }
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

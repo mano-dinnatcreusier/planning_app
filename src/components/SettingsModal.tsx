@@ -67,12 +67,14 @@ ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS points_absolute INTEGER 
 ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS points_relative INTEGER DEFAULT 150;
 ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS user_start_context TEXT;
 ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS ai_explanation TEXT;
+ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high'));
 
 -- Ajouter les colonnes de scoring aux jalons
 ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS est_hours INTEGER DEFAULT 2;
 ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS perceived_difficulty INTEGER DEFAULT 3;
 ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS points_absolute INTEGER DEFAULT 30;
-ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS points_relative INTEGER DEFAULT 30;`;
+ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS points_relative INTEGER DEFAULT 30;
+ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high'));`;
 
     navigator.clipboard.writeText(sql);
     setCopiedMigration(true);
@@ -89,6 +91,7 @@ CREATE TABLE final_goals (
     target_date DATE,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
+    priority TEXT DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
     est_hours INTEGER DEFAULT 10,
     perceived_difficulty INTEGER DEFAULT 3,
     coeff_public NUMERIC(3,2) DEFAULT 1.5,
@@ -110,6 +113,7 @@ CREATE TABLE milestones (
     target_date DATE,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
+    priority TEXT DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
     est_hours INTEGER DEFAULT 2,
     perceived_difficulty INTEGER DEFAULT 3,
     points_absolute INTEGER DEFAULT 30,
