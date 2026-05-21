@@ -460,8 +460,18 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
                     );
                     setCoeffPublic(result.coeff_public);
                     setCoeffPersonal(result.coeff_personal);
+                    
+                    if (result.suggested_hours && result.suggested_hours > 0) {
+                      setEstHours(result.suggested_hours);
+                    }
+
+                    const hoursDiff = result.suggested_hours - estHours;
+                    const hoursMsg = hoursDiff !== 0 
+                      ? `\n⏱️ Ajustement de l'effort : L'IA a ajusté votre estimation de ${estHours}h à ${result.suggested_hours}h pour être plus réaliste face à ce défi.` 
+                      : `\n⏱️ Estimation de l'effort : L'IA confirme votre estimation de ${estHours}h comme très réaliste.`;
+
                     setAiExplanation(
-                      `🌍 ${result.explanation_public}\n👤 ${result.explanation_personal}`
+                      `🌍 ${result.explanation_public}\n👤 ${result.explanation_personal}${hoursMsg}`
                     );
                   } catch (err: any) {
                     setErrorMsg(err.message || 'Échec de la connexion IA.');
