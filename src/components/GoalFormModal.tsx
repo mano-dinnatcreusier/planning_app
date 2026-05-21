@@ -177,9 +177,10 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
         backdropFilter: 'blur(12px)',
         zIndex: 1000,
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'center',
-        padding: '20px'
+        padding: '40px 20px',
+        overflowY: 'auto'
       }}
       className="animate-fade-in"
     >
@@ -191,7 +192,8 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
           borderRadius: 'var(--border-radius-lg)',
           padding: '30px',
           animation: 'slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-          position: 'relative'
+          position: 'relative',
+          marginBottom: '20px'
         }}
       >
         {/* Header */}

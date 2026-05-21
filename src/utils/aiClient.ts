@@ -18,6 +18,7 @@ interface AiEvaluationResult {
   coeff_personal: number;
   explanation_public: string;
   explanation_personal: string;
+  suggested_hours: number;
 }
 
 export const evaluateGoalViaAi = async (
@@ -42,9 +43,10 @@ Défi à évaluer :
 Calcule de manière réaliste et cohérente :
 1. "coeff_public" (nombre décimal entre 1.0 et 3.0) : Estimation globale de la rareté mondiale et l'effort objectif du défi (ex: marathon sub-2h30 = 3.0, MVP SaaS solo = 2.0, lire un livre = 1.0).
 2. "coeff_personal" (nombre décimal entre 0.2 et 3.0) : Ajustement en fonction de la situation de départ. Si l'utilisateur a un fort niveau préexistant, ce coeff doit être bas (ex: < 0.6). S'il commence avec des difficultés/désavantages, ce coeff doit être haut (ex: > 1.5).
+3. "suggested_hours" (nombre entier positif) : Estime de manière réaliste et objective le nombre total d'heures nécessaires pour qu'un utilisateur moyen accomplisse cet objectif. N'hésite pas à réajuster significativement la valeur initiale de l'utilisateur ("${estHours}" heures) si elle semble sous-estimée ou surestimée.
 
 Format de sortie strict en JSON valide uniquement, sans Markdown, sans enrobage, sans commentaires. Exemple :
-{"coeff_public": 1.5, "coeff_personal": 1.0, "explanation_public": "explication", "explanation_personal": "explication"}`;
+{"coeff_public": 1.5, "coeff_personal": 1.0, "explanation_public": "explication", "explanation_personal": "explication", "suggested_hours": 45}`;
 
   const response = await fetch(`${config.url}/chat/completions`, {
     method: 'POST',
@@ -79,7 +81,8 @@ Format de sortie strict en JSON valide uniquement, sans Markdown, sans enrobage,
       coeff_public: Number(parsed.coeff_public) || 1.5,
       coeff_personal: Number(parsed.coeff_personal) || 1.0,
       explanation_public: parsed.explanation_public || "Évaluation standard.",
-      explanation_personal: parsed.explanation_personal || "Ajustement standard."
+      explanation_personal: parsed.explanation_personal || "Ajustement standard.",
+      suggested_hours: Number(parsed.suggested_hours) || estHours
     };
   } catch (err) {
     console.error("Format de réponse IA incorrect :", rawText);
