@@ -1,10 +1,10 @@
 import React from 'react';
 import { useGoals } from '../context/GoalContext';
-import { LayoutDashboard, CalendarRange, Database, Trophy, Sparkles, CalendarDays } from 'lucide-react';
+import { LayoutDashboard, CalendarRange, Database, Trophy, Sparkles, CalendarDays, Activity } from 'lucide-react';
 
 interface SidebarProps {
-  activeTab: 'dashboard' | 'timeline' | 'calendar';
-  setActiveTab: (tab: 'dashboard' | 'timeline' | 'calendar') => void;
+  activeTab: 'dashboard' | 'timeline' | 'calendar' | 'habits';
+  setActiveTab: (tab: 'dashboard' | 'timeline' | 'calendar' | 'habits') => void;
   selectedGoalId: string | null;
   setSelectedGoalId: (id: string | null) => void;
   openSettings: () => void;
@@ -180,6 +180,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           <CalendarDays size={18} />
           Calendrier Planif
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('habits');
+            setSelectedGoalId(null);
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '12px 16px',
+            borderRadius: 'var(--border-radius-md)',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+            fontWeight: 500,
+            transition: 'var(--transition-fast)',
+            textAlign: 'left',
+            width: '100%',
+            backgroundColor: activeTab === 'habits' ? 'rgba(168, 85, 247, 0.08)' : 'transparent',
+            color: activeTab === 'habits' ? 'var(--accent-primary)' : 'var(--text-med)',
+            borderLeft: activeTab === 'habits' ? '3px solid var(--accent-primary)' : '3px solid transparent'
+          }}
+          onMouseOver={(e) => {
+            if (activeTab !== 'habits') {
+              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+              e.currentTarget.style.color = 'var(--text-high)';
+            }
+          }}
+          onMouseOut={(e) => {
+            if (activeTab !== 'habits') {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--text-med)';
+            }
+          }}
+        >
+          <Activity size={18} />
+          Habitudes & Routines
         </button>
       </div>
 

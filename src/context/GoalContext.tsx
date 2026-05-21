@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { FinalGoal, Milestone, Subtask, AiConfig } from '../types';
+import type { FinalGoal, Milestone, Subtask, AiConfig, Habit, HabitLog } from '../types';
 import { getSupabase, initSupabaseClient, getSupabaseConfig } from '../utils/supabaseClient';
 import { getAiConfig, saveAiConfigInStorage } from '../utils/aiClient';
 
@@ -7,6 +7,8 @@ interface GoalContextType {
   finalGoals: FinalGoal[];
   milestones: Milestone[];
   subtasks: Subtask[];
+  habits: Habit[];
+  habitLogs: HabitLog[];
   loading: boolean;
   isSupabaseConnected: boolean;
   supabaseConfig: { url: string; anonKey: string };
@@ -26,6 +28,10 @@ interface GoalContextType {
   addSubtask: (milestoneId: string, title: string) => Promise<void>;
   toggleSubtask: (id: string, isCompleted: boolean) => Promise<void>;
   deleteSubtask: (id: string) => Promise<void>;
+  // Habits CRUD
+  addHabit: (habitData: Omit<Habit, 'id' | 'created_at'>) => Promise<string>;
+  deleteHabit: (id: string) => Promise<void>;
+  toggleHabitLog: (habitId: string, date: string, currentStatus: 'done' | 'missed' | null) => Promise<void>;
   // Config & Demo Data
   saveSupabaseConfig: (url: string, key: string) => Promise<boolean>;
   saveAiConfig: (url: string, apiKey: string, model: string) => Promise<void>;
@@ -39,6 +45,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [finalGoals, setFinalGoals] = useState<FinalGoal[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isSupabaseConnected, setIsSupabaseConnected] = useState<boolean>(false);
   const [supabaseConfig, setSupabaseConfig] = useState(getSupabaseConfig());
@@ -83,14 +91,18 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { data: fgData, error: fgErr } = await supabase.from('final_goals').select('*').order('created_at', { ascending: false });
         const { data: msData, error: msErr } = await supabase.from('milestones').select('*').order('order_index', { ascending: true });
         const { data: stData, error: stErr } = await supabase.from('subtasks').select('*').order('order_index', { ascending: true });
+        const { data: hbData, error: hbErr } = await supabase.from('habits').select('*').order('created_at', { ascending: false });
+        const { data: hblData, error: hblErr } = await supabase.from('habit_logs').select('*');
 
-        if (fgErr || msErr || stErr) {
+        if (fgErr || msErr || stErr || hbErr || hblErr) {
           throw new Error('Supabase fetch error');
         }
 
         setFinalGoals(fgData || []);
         setMilestones(msData || []);
         setSubtasks(stData || []);
+        setHabits(hbData || []);
+        setHabitLogs(hblData || []);
       } catch (err) {
         console.error('Supabase failed, falling back to LocalStorage', err);
         loadFromLocalStorage();
@@ -105,10 +117,14 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const fg = localStorage.getItem('fg_goals');
     const ms = localStorage.getItem('fg_milestones');
     const st = localStorage.getItem('fg_subtasks');
+    const hb = localStorage.getItem('fg_habits');
+    const hbl = localStorage.getItem('fg_habit_logs');
 
     setFinalGoals(fg ? JSON.parse(fg) : []);
     setMilestones(ms ? JSON.parse(ms) : []);
     setSubtasks(st ? JSON.parse(st) : []);
+    setHabits(hb ? JSON.parse(hb) : []);
+    setHabitLogs(hbl ? JSON.parse(hbl) : []);
   };
 
   // Sync to LocalStorage (helper for LS mode)
@@ -116,6 +132,11 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem('fg_goals', JSON.stringify(fg));
     localStorage.setItem('fg_milestones', JSON.stringify(ms));
     localStorage.setItem('fg_subtasks', JSON.stringify(st));
+  };
+
+  const syncHabitsToLocalStorage = (hbList: Habit[], hblList: HabitLog[]) => {
+    localStorage.setItem('fg_habits', JSON.stringify(hbList));
+    localStorage.setItem('fg_habit_logs', JSON.stringify(hblList));
   };
 
   // Helper dynamic calculations
@@ -713,12 +734,83 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // --- HABITS CRUD ---
+  const addHabit = async (habitData: Omit<Habit, 'id' | 'created_at'>) => {
+    const newHabit: Habit = {
+      id: crypto.randomUUID(),
+      created_at: new Date().toISOString(),
+      ...habitData
+    };
+    const supabase = getSupabase();
+    if (supabase) {
+      const { error } = await supabase.from('habits').insert(newHabit);
+      if (error) throw error;
+      setHabits(prev => [newHabit, ...prev]);
+    } else {
+      await new Promise(r => setTimeout(r, 100));
+      const nextHabits = [newHabit, ...habits];
+      setHabits(nextHabits);
+      syncHabitsToLocalStorage(nextHabits, habitLogs);
+    }
+    return newHabit.id;
+  };
+
+  const deleteHabit = async (id: string) => {
+    const supabase = getSupabase();
+    if (supabase) {
+      const { error } = await supabase.from('habits').delete().eq('id', id);
+      if (error) throw error;
+      setHabits(prev => prev.filter(h => h.id !== id));
+      setHabitLogs(prev => prev.filter(l => l.habit_id !== id));
+    } else {
+      const nextHabits = habits.filter(h => h.id !== id);
+      const nextLogs = habitLogs.filter(l => l.habit_id !== id);
+      setHabits(nextHabits);
+      setHabitLogs(nextLogs);
+      syncHabitsToLocalStorage(nextHabits, nextLogs);
+    }
+  };
+
+  const toggleHabitLog = async (habitId: string, date: string, currentStatus: 'done' | 'missed' | null) => {
+    const nextStatus = currentStatus === null ? 'done' : currentStatus === 'done' ? 'missed' : null;
+    const supabase = getSupabase();
+    
+    if (supabase) {
+      if (nextStatus === null) {
+        const { error } = await supabase.from('habit_logs').delete().eq('habit_id', habitId).eq('date', date);
+        if (error) throw error;
+        setHabitLogs(prev => prev.filter(l => !(l.habit_id === habitId && l.date === date)));
+      } else {
+        const newLog: HabitLog = { habit_id: habitId, date, status: nextStatus as 'done' | 'missed' };
+        const { error } = await supabase.from('habit_logs').upsert(newLog);
+        if (error) throw error;
+        setHabitLogs(prev => {
+          const filtered = prev.filter(l => !(l.habit_id === habitId && l.date === date));
+          return [...filtered, newLog];
+        });
+      }
+    } else {
+      let nextLogs = [...habitLogs];
+      if (nextStatus === null) {
+        nextLogs = nextLogs.filter(l => !(l.habit_id === habitId && l.date === date));
+      } else {
+        const newLog: HabitLog = { habit_id: habitId, date, status: nextStatus as 'done' | 'missed' };
+        const filtered = nextLogs.filter(l => !(l.habit_id === habitId && l.date === date));
+        nextLogs = [...filtered, newLog];
+      }
+      setHabitLogs(nextLogs);
+      syncHabitsToLocalStorage(habits, nextLogs);
+    }
+  };
+
   return (
     <GoalContext.Provider
       value={{
         finalGoals: computedFinalGoals,
         milestones: computedMilestones,
         subtasks,
+        habits,
+        habitLogs,
         loading,
         isSupabaseConnected,
         supabaseConfig,
@@ -735,6 +827,9 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         addSubtask,
         toggleSubtask,
         deleteSubtask,
+        addHabit,
+        deleteHabit,
+        toggleHabitLog,
         saveSupabaseConfig,
         saveAiConfig,
         clearDatabase,

@@ -16,7 +16,10 @@ export const GoalCalendar: React.FC = () => {
     finalGoals, 
     milestones, 
     updateFinalGoalDate, 
-    updateMilestoneDate 
+    updateMilestoneDate,
+    habits,
+    habitLogs,
+    toggleHabitLog
   } = useGoals();
 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -252,9 +255,10 @@ export const GoalCalendar: React.FC = () => {
             gap: '8px'
           }}>
             {gridDays.map(({ date, isCurrentMonth, dateString }) => {
-              // Find all goals/milestones targeting this dateString
+              // Find all goals/milestones/habits targeting this dateString
               const cellGoals = finalGoals.filter(g => g.target_date === dateString);
               const cellMilestones = milestones.filter(m => m.target_date === dateString);
+              const activeHabits = habits.filter(h => dateString >= h.start_date && dateString <= h.end_date);
               
               const isHovered = hoveredDate === dateString;
               const isPulsing = pulseDate === dateString;
@@ -424,6 +428,74 @@ export const GoalCalendar: React.FC = () => {
                         {ms.priority === 'high' && !isCompleted && (
                           <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: '#f43f5e', flexShrink: 0, display: 'inline-block', boxShadow: '0 0 4px #f43f5e' }} />
                         )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Habits inside this cell */}
+                  {activeHabits.map(h => {
+                    const log = habitLogs.find(l => l.habit_id === h.id && l.date === dateString);
+                    const logStatus = log ? log.status : null;
+                    
+                    const badgeBg = logStatus === 'done' 
+                      ? 'rgba(16, 185, 129, 0.12)' 
+                      : logStatus === 'missed' 
+                        ? 'rgba(244, 63, 94, 0.12)' 
+                        : 'rgba(255, 255, 255, 0.02)';
+                        
+                    const borderCol = logStatus === 'done' 
+                      ? 'rgba(16, 185, 129, 0.3)' 
+                      : logStatus === 'missed' 
+                        ? 'rgba(244, 63, 94, 0.3)' 
+                        : 'rgba(255, 255, 255, 0.08)';
+                        
+                    const textCol = logStatus === 'done' 
+                      ? '#a7f3d0' 
+                      : logStatus === 'missed' 
+                        ? '#fca5a5' 
+                        : '#cbd5e1';
+
+                    const statusIndicator = logStatus === 'done' 
+                      ? '🟢' 
+                      : logStatus === 'missed' 
+                        ? '🔴' 
+                        : '⚪';
+
+                    return (
+                      <div
+                        key={h.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleHabitLog(h.id, dateString, logStatus);
+                        }}
+                        style={{
+                          backgroundColor: badgeBg,
+                          border: `1px solid ${borderCol}`,
+                          borderRadius: '4px',
+                          padding: '3px 6px',
+                          fontSize: '0.66rem',
+                          color: textCol,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          transition: 'all 0.15s ease',
+                          userSelect: 'none'
+                        }}
+                        className="glass-interactive"
+                        title={`${h.title} (Habitude) - Cliquer pour changer le statut`}
+                      >
+                        <span style={{ fontSize: '0.55rem', flexShrink: 0 }}>{statusIndicator}</span>
+                        <span style={{ 
+                          overflow: 'hidden', 
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {h.title}
+                        </span>
                       </div>
                     );
                   })}

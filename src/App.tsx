@@ -5,13 +5,14 @@ import { MobileNav } from './components/MobileNav';
 import { Dashboard } from './components/Dashboard';
 import { GoalTimeline } from './components/GoalTimeline';
 import { GoalCalendar } from './components/GoalCalendar';
+import { HabitsView } from './components/HabitsView';
 import { SettingsModal } from './components/SettingsModal';
 import { GoalFormModal } from './components/GoalFormModal';
 import type { FinalGoal, Milestone } from './types';
 
 // Core component wrapped in provider
 const MainApp: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'timeline' | 'calendar'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'timeline' | 'calendar' | 'habits'>('dashboard');
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   
   // Modals visibility states
@@ -102,8 +103,10 @@ const MainApp: React.FC = () => {
             }}
             openEditMilestoneModal={openEditMilestoneModal}
           />
-        ) : (
+        ) : activeTab === 'calendar' ? (
           <GoalCalendar />
+        ) : (
+          <HabitsView />
         )}
       </main>
 

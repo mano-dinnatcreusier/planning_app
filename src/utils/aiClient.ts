@@ -142,3 +142,67 @@ Format de sortie STRICT en JSON représentant un tableau de chaînes de caractè
     throw new Error("L'IA a renvoyé des suggestions de tâches invalides.");
   }
 };
+
+export interface HabitSuggestionResult {
+  title: string;
+  description: string;
+  frequency_type: 'daily' | 'weekly' | 'custom';
+  custom_days_per_week?: number;
+  explanation: string;
+}
+
+export const suggestHabitViaAi = async (
+  goalTitles: string[],
+  frequencyPref: string,
+  config: AiConfig
+): Promise<HabitSuggestionResult> => {
+  if (!config.apiKey) {
+    throw new Error("Clé API manquante pour les suggestions d'habitudes.");
+  }
+
+  const prompt = `Objectifs liés : ${goalTitles.map(t => `"${t}"`).join(', ')}
+Préférence de fréquence : "${frequencyPref}" (si la préférence est "IA", choisis la fréquence idéale entre 'daily', 'weekly', 'custom').
+
+Propose une habitude concrète, réaliste et extrêmement bénéfique pour aider à atteindre ces objectifs.
+Format de sortie strict en JSON valide uniquement, sans Markdown, sans enrobage, sans commentaires. Exemple :
+{"title": "Courir 20 minutes", "description": "Faire un footing matinal pour travailler l'endurance fondamentale.", "frequency_type": "daily", "custom_days_per_week": null, "explanation": "Cette habitude permet de créer une routine cardiovasculaire essentielle pour courir un marathon."}`;
+
+  const response = await fetch(`${config.url}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages: [
+        { role: 'system', content: 'Tu es un coach en habitude expert en productivité. Réponds uniquement en format JSON.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.7
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Erreur API IA (${response.status}) : ${errorText}`);
+  }
+
+  const responseData = await response.json();
+  const rawText = responseData.choices?.[0]?.message?.content?.trim() || '{}';
+  const cleanedJson = rawText.replace(/```json/i, '').replace(/```/g, '').trim();
+
+  try {
+    const parsed = JSON.parse(cleanedJson);
+    return {
+      title: parsed.title || "Nouvelle habitude",
+      description: parsed.description || "",
+      frequency_type: parsed.frequency_type || 'daily',
+      custom_days_per_week: parsed.custom_days_per_week ? Number(parsed.custom_days_per_week) : undefined,
+      explanation: parsed.explanation || "Routine suggérée pour soutenir vos objectifs."
+    };
+  } catch (err) {
+    console.error("Format de réponse de suggestion IA incorrect :", rawText);
+    throw new Error("L'IA a renvoyé une suggestion invalide. Veuillez réessayer.");
+  }
+};

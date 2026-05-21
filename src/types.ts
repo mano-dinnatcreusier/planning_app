@@ -60,3 +60,21 @@ export interface AiConfig {
   model: string;
 }
 
+export interface Habit {
+  id: string;
+  title: string;
+  description?: string;
+  start_date: string;
+  end_date: string;
+  frequency_type: 'daily' | 'weekly' | 'custom';
+  custom_days_per_week?: number;
+  goal_ids: string[];
+  created_at: string;
+}
+
+export interface HabitLog {
+  habit_id: string;
+  date: string;
+  status: 'done' | 'missed';
+}
+

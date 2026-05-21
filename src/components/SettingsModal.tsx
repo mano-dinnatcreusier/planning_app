@@ -128,6 +128,27 @@ CREATE TABLE subtasks (
     is_completed BOOLEAN DEFAULT FALSE NOT NULL,
     order_index INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL
+);
+
+-- Table des Habitudes (Routines)
+CREATE TABLE IF NOT EXISTS habits (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    description TEXT,
+    start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    end_date DATE NOT NULL,
+    frequency_type TEXT NOT NULL CHECK (frequency_type IN ('daily', 'weekly', 'custom')),
+    custom_days_per_week INTEGER,
+    goal_ids TEXT[] DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL
+);
+
+-- Table des logs de validation d'habitudes
+CREATE TABLE IF NOT EXISTS habit_logs (
+    habit_id UUID REFERENCES habits(id) ON DELETE CASCADE NOT NULL,
+    date DATE NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('done', 'missed')),
+    PRIMARY KEY (habit_id, date)
 );`;
 
     navigator.clipboard.writeText(sql);
@@ -529,6 +550,27 @@ CREATE TABLE subtasks (
     is_completed BOOLEAN DEFAULT FALSE NOT NULL,
     order_index INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL
+);
+
+-- Table des Habitudes (Routines)
+CREATE TABLE IF NOT EXISTS habits (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    description TEXT,
+    start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    end_date DATE NOT NULL,
+    frequency_type TEXT NOT NULL CHECK (frequency_type IN ('daily', 'weekly', 'custom')),
+    custom_days_per_week INTEGER,
+    goal_ids TEXT[] DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL
+);
+
+-- Table des logs de validation d'habitudes
+CREATE TABLE IF NOT EXISTS habit_logs (
+    habit_id UUID REFERENCES habits(id) ON DELETE CASCADE NOT NULL,
+    date DATE NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('done', 'missed')),
+    PRIMARY KEY (habit_id, date)
 );`}
           </pre>
         </div>

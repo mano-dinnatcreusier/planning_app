@@ -1,9 +1,8 @@
-import React from 'react';
-import { LayoutDashboard, CalendarRange, Database, CalendarDays } from 'lucide-react';
+import { LayoutDashboard, CalendarRange, Database, CalendarDays, Activity } from 'lucide-react';
 
 interface MobileNavProps {
-  activeTab: 'dashboard' | 'timeline' | 'calendar';
-  setActiveTab: (tab: 'dashboard' | 'timeline' | 'calendar') => void;
+  activeTab: 'dashboard' | 'timeline' | 'calendar' | 'habits';
+  setActiveTab: (tab: 'dashboard' | 'timeline' | 'calendar' | 'habits') => void;
   openSettings: () => void;
 }
 
@@ -97,6 +96,29 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           filter: activeTab === 'calendar' ? 'drop-shadow(0 0 4px var(--accent-primary-glow))' : 'none'
         }} />
         <span style={{ fontSize: '0.65rem', fontWeight: 600 }}>Calendrier</span>
+      </button>
+
+      <button
+        onClick={() => setActiveTab('habits')}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '4px',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          color: activeTab === 'habits' ? 'var(--accent-primary)' : 'var(--text-med)',
+          transition: 'var(--transition-fast)',
+          width: '60px',
+          height: '100%'
+        }}
+      >
+        <Activity size={20} style={{
+          filter: activeTab === 'habits' ? 'drop-shadow(0 0 4px var(--accent-primary-glow))' : 'none'
+        }} />
+        <span style={{ fontSize: '0.65rem', fontWeight: 600 }}>Habitudes</span>
       </button>
 
       <button
