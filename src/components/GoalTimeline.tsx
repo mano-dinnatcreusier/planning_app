@@ -128,11 +128,37 @@ export const GoalTimeline: React.FC<GoalTimelineProps> = ({
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
               <DifficultyIndicator level={activeGoal.difficulty} />
               <span className={`badge ${activeGoal.progress === 100 ? 'badge-emerald' : 'badge-purple'}`}>
                 {activeGoal.progress === 100 ? 'Complété' : 'En cours'}
               </span>
+              {activeGoal.points_absolute !== undefined && (
+                <span style={{
+                  fontSize: '0.65rem',
+                  fontWeight: 700,
+                  backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                  color: 'var(--accent-primary)',
+                  padding: '2px 8px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(168, 85, 247, 0.15)'
+                }} title="Points XP Absolus">
+                  {activeGoal.points_absolute} XP Abs.
+                </span>
+              )}
+              {activeGoal.points_relative !== undefined && (
+                <span style={{
+                  fontSize: '0.65rem',
+                  fontWeight: 700,
+                  backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                  color: 'var(--accent-secondary)',
+                  padding: '2px 8px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(6, 182, 212, 0.15)'
+                }} title="Points XP Relatifs">
+                  {activeGoal.points_relative} XP Rel.
+                </span>
+              )}
             </div>
             <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>{activeGoal.title}</h2>
             <p style={{ color: 'var(--text-med)', fontSize: '0.88rem', marginTop: '6px', maxWidth: '800px', lineHeight: 1.4 }}>
@@ -314,9 +340,35 @@ export const GoalTimeline: React.FC<GoalTimelineProps> = ({
                       }}
                     >
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '75%' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                          <h4 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-high)' }}>{ms.title}</h4>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <h4 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-high)', margin: 0 }}>{ms.title}</h4>
                           <DifficultyIndicator level={ms.difficulty} showLabel={false} />
+                          {ms.points_absolute !== undefined && (
+                            <span style={{
+                              fontSize: '0.62rem',
+                              fontWeight: 700,
+                              backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                              color: 'var(--accent-primary)',
+                              padding: '1px 6px',
+                              borderRadius: '8px',
+                              border: '1px solid rgba(168, 85, 247, 0.12)'
+                            }} title="Points XP Absolus pour ce jalon">
+                              {ms.points_absolute} XP Abs.
+                            </span>
+                          )}
+                          {ms.points_relative !== undefined && (
+                            <span style={{
+                              fontSize: '0.62rem',
+                              fontWeight: 700,
+                              backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                              color: 'var(--accent-secondary)',
+                              padding: '1px 6px',
+                              borderRadius: '8px',
+                              border: '1px solid rgba(6, 182, 212, 0.12)'
+                            }} title="Points XP Relatifs (Ajustés à votre profil)">
+                              {ms.points_relative} XP Rel.
+                            </span>
+                          )}
                         </div>
                         <p style={{ fontSize: '0.8rem', color: 'var(--text-med)', lineHeight: 1.4 }}>
                           {ms.description}

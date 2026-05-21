@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useGoals } from '../context/GoalContext';
-import { Database, X, CheckCircle, AlertTriangle, Copy, Check } from 'lucide-react';
+import { Database, X, CheckCircle, AlertTriangle, Copy, Check, Sparkles } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -12,13 +12,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     supabaseConfig,
     isSupabaseConnected,
     saveSupabaseConfig,
+    aiConfig,
+    saveAiConfig,
     clearDatabase,
     loadDemoData
   } = useGoals();
 
   const [url, setUrl] = useState(supabaseConfig.url);
   const [anonKey, setAnonKey] = useState(supabaseConfig.anonKey);
+  const [aiUrl, setAiUrl] = useState(aiConfig.url);
+  const [aiApiKey, setAiApiKey] = useState(aiConfig.apiKey);
+  const [aiModel, setAiModel] = useState(aiConfig.model);
   const [copied, setCopied] = useState(false);
+  const [copiedMigration, setCopiedMigration] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; error: boolean } | null>(null);
 
   if (!isOpen) return null;
@@ -26,12 +32,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMessage(null);
-    const success = await saveSupabaseConfig(url, anonKey);
-    if (success) {
-      setStatusMessage({ text: 'Configuration enregistrée et connectée avec succès !', error: false });
-      setTimeout(() => onClose(), 1500);
+    
+    // Save configurations
+    const dbSuccess = await saveSupabaseConfig(url, anonKey);
+    await saveAiConfig(aiUrl, aiApiKey, aiModel);
+    
+    if (url && anonKey) {
+      if (dbSuccess) {
+        setStatusMessage({ text: 'Configuration DB & IA enregistrée et connectée !', error: false });
+        setTimeout(() => onClose(), 1500);
+      } else {
+        setStatusMessage({ text: 'Échec de la connexion Supabase. Vérifiez les informations.', error: true });
+      }
     } else {
-      setStatusMessage({ text: 'Échec de la connexion. Vérifiez les informations saisies.', error: true });
+      setStatusMessage({ text: 'Configuration IA enregistrée avec succès (Mode Démo Local actif).', error: false });
+      setTimeout(() => onClose(), 1500);
     }
   };
 
@@ -40,6 +55,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setUrl('');
     setAnonKey('');
     setStatusMessage({ text: 'Déconnecté de Supabase. Retour au mode LocalStorage.', error: false });
+  };
+
+  const copyMigrationSQL = () => {
+    const sql = `-- Ajouter les colonnes de scoring aux objectifs
+ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS est_hours INTEGER DEFAULT 10;
+ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS perceived_difficulty INTEGER DEFAULT 3;
+ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS coeff_public NUMERIC(3,2) DEFAULT 1.5;
+ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS coeff_personal NUMERIC(3,2) DEFAULT 1.0;
+ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS points_absolute INTEGER DEFAULT 150;
+ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS points_relative INTEGER DEFAULT 150;
+ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS user_start_context TEXT;
+ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS ai_explanation TEXT;
+
+-- Ajouter les colonnes de scoring aux jalons
+ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS est_hours INTEGER DEFAULT 2;
+ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS perceived_difficulty INTEGER DEFAULT 3;
+ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS points_absolute INTEGER DEFAULT 30;
+ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS points_relative INTEGER DEFAULT 30;`;
+
+    navigator.clipboard.writeText(sql);
+    setCopiedMigration(true);
+    setTimeout(() => setCopiedMigration(false), 2000);
   };
 
   const copySQL = () => {
@@ -51,7 +88,15 @@ CREATE TABLE final_goals (
     difficulty INTEGER DEFAULT 3 CHECK (difficulty BETWEEN 1 AND 5),
     target_date DATE,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed')),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
+    est_hours INTEGER DEFAULT 10,
+    perceived_difficulty INTEGER DEFAULT 3,
+    coeff_public NUMERIC(3,2) DEFAULT 1.5,
+    coeff_personal NUMERIC(3,2) DEFAULT 1.0,
+    points_absolute INTEGER DEFAULT 150,
+    points_relative INTEGER DEFAULT 150,
+    user_start_context TEXT,
+    ai_explanation TEXT
 );
 
 -- Table des Jalons (Milestones)
@@ -64,7 +109,11 @@ CREATE TABLE milestones (
     order_index INTEGER DEFAULT 0,
     target_date DATE,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed')),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
+    est_hours INTEGER DEFAULT 2,
+    perceived_difficulty INTEGER DEFAULT 3,
+    points_absolute INTEGER DEFAULT 30,
+    points_relative INTEGER DEFAULT 30
 );
 
 -- Table des Sous-tâches
@@ -242,6 +291,87 @@ CREATE TABLE subtasks (
             />
           </div>
 
+          {/* AI Settings Section */}
+          <div style={{
+            borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+            paddingTop: '20px',
+            marginTop: '10px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '14px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <Sparkles size={16} style={{ color: 'var(--accent-primary)' }} />
+              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: '#ffffff' }}>Configuration IA (Optionnel)</h4>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-med)', marginBottom: '6px' }}>
+                Endpoint API IA (compatible OpenAI)
+              </label>
+              <input
+                type="text"
+                value={aiUrl}
+                onChange={(e) => setAiUrl(e.target.value)}
+                placeholder="https://api.deepseek.com/v1"
+                style={{
+                  width: '100%',
+                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--border-radius-md)',
+                  padding: '10px 14px',
+                  fontSize: '0.85rem',
+                  outline: 'none',
+                  color: '#ffffff'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-med)', marginBottom: '6px' }}>
+                Clé API IA (DeepSeek / OpenAI API Key)
+              </label>
+              <input
+                type="password"
+                value={aiApiKey}
+                onChange={(e) => setAiApiKey(e.target.value)}
+                placeholder="sk-..."
+                style={{
+                  width: '100%',
+                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--border-radius-md)',
+                  padding: '10px 14px',
+                  fontSize: '0.85rem',
+                  outline: 'none',
+                  color: '#ffffff'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-med)', marginBottom: '6px' }}>
+                Modèle d'Évaluation
+              </label>
+              <input
+                type="text"
+                value={aiModel}
+                onChange={(e) => setAiModel(e.target.value)}
+                placeholder="deepseek-chat"
+                style={{
+                  width: '100%',
+                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--border-radius-md)',
+                  padding: '10px 14px',
+                  fontSize: '0.85rem',
+                  outline: 'none',
+                  color: '#ffffff'
+                }}
+              />
+            </div>
+          </div>
+
           {statusMessage && (
             <div style={{
               fontSize: '0.85rem',
@@ -301,25 +431,52 @@ CREATE TABLE subtasks (
 
         {/* Database setup SQL info */}
         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '24px', marginBottom: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>SQL pour initialiser Supabase</h3>
-            <button
-              onClick={copySQL}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                fontSize: '0.75rem',
-                color: 'var(--accent-primary)',
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                fontWeight: 500
-              }}
-            >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-              {copied ? 'Copié !' : 'Copier le script SQL'}
-            </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>Configuration SQL Supabase</h3>
+            
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                onClick={copySQL}
+                type="button"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '0.75rem',
+                  color: 'var(--accent-primary)',
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid var(--border-color)',
+                  padding: '6px 12px',
+                  borderRadius: 'var(--border-radius-sm)',
+                  cursor: 'pointer',
+                  fontWeight: 500
+                }}
+              >
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+                {copied ? 'Table Initialisation Copiée !' : 'Copier SQL Initialisation'}
+              </button>
+
+              <button
+                onClick={copyMigrationSQL}
+                type="button"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '0.75rem',
+                  color: 'var(--accent-secondary)',
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid var(--border-color)',
+                  padding: '6px 12px',
+                  borderRadius: 'var(--border-radius-sm)',
+                  cursor: 'pointer',
+                  fontWeight: 500
+                }}
+              >
+                {copiedMigration ? <Check size={14} /> : <Copy size={14} />}
+                {copiedMigration ? 'Migration Points Copiée !' : 'Copier SQL Migration'}
+              </button>
+            </div>
           </div>
           <p style={{ color: 'var(--text-med)', fontSize: '0.8rem', marginBottom: '12px', lineHeight: 1.4 }}>
             Allez dans le <strong>SQL Editor</strong> de votre console Supabase, collez le script ci-dessous, puis cliquez sur <strong>Run</strong> pour configurer la base de données.

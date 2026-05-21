@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useGoals } from '../context/GoalContext';
 import type { FinalGoal, Milestone } from '../types';
-import { Plus, X, AlertCircle } from 'lucide-react';
+import { Plus, X, AlertCircle, Sparkles, Trash2, HelpCircle } from 'lucide-react';
+import { evaluateGoalViaAi, suggestSubtasksViaAi } from '../utils/aiClient';
 
 interface GoalFormModalProps {
   isOpen: boolean;
@@ -22,7 +23,7 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
   milestoneToEdit,
   parentId
 }) => {
-  const { addFinalGoal, updateFinalGoal, addMilestone, updateMilestone } = useGoals();
+  const { addFinalGoal, updateFinalGoal, addMilestone, updateMilestone, aiConfig, addSubtask } = useGoals();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -30,6 +31,17 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
   const [targetDate, setTargetDate] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Points & AI scoring states
+  const [estHours, setEstHours] = useState(type === 'goal' ? 10 : 2);
+  const [perceivedDifficulty, setPerceivedDifficulty] = useState(3);
+  const [coeffPublic, setCoeffPublic] = useState(1.5);
+  const [coeffPersonal, setCoeffPersonal] = useState(1.0);
+  const [userStartContext, setUserStartContext] = useState('');
+  const [aiExplanation, setAiExplanation] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [generatedSubtaskTitles, setGeneratedSubtaskTitles] = useState<string[]>([]);
+  const [tempSubtaskInput, setTempSubtaskInput] = useState('');
 
   // Prepopulate form if editing
   useEffect(() => {
@@ -41,11 +53,21 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
           setDescription(goalToEdit.description);
           setDifficulty(goalToEdit.difficulty);
           setTargetDate(goalToEdit.target_date);
+          setEstHours(goalToEdit.est_hours ?? 10);
+          setPerceivedDifficulty(goalToEdit.perceived_difficulty ?? goalToEdit.difficulty);
+          setCoeffPublic(goalToEdit.coeff_public ?? 1.5);
+          setCoeffPersonal(goalToEdit.coeff_personal ?? 1.0);
+          setUserStartContext(goalToEdit.user_start_context ?? '');
+          setAiExplanation(goalToEdit.ai_explanation ?? '');
+          setGeneratedSubtaskTitles([]);
         } else if (type === 'milestone' && milestoneToEdit) {
           setTitle(milestoneToEdit.title);
           setDescription(milestoneToEdit.description);
           setDifficulty(milestoneToEdit.difficulty);
           setTargetDate(milestoneToEdit.target_date);
+          setEstHours(milestoneToEdit.est_hours ?? 2);
+          setPerceivedDifficulty(milestoneToEdit.perceived_difficulty ?? milestoneToEdit.difficulty);
+          setGeneratedSubtaskTitles([]);
         }
       } else {
         // Create mode resets
@@ -55,6 +77,14 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
         const defaultDate = new Date();
         defaultDate.setDate(defaultDate.getDate() + 30); // 30 days from now default
         setTargetDate(defaultDate.toISOString().split('T')[0]);
+        setEstHours(type === 'goal' ? 10 : 2);
+        setPerceivedDifficulty(3);
+        setCoeffPublic(1.5);
+        setCoeffPersonal(1.0);
+        setUserStartContext('');
+        setAiExplanation('');
+        setGeneratedSubtaskTitles([]);
+        setTempSubtaskInput('');
       }
     }
   }, [isOpen, mode, type, goalToEdit, milestoneToEdit]);
@@ -76,24 +106,48 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
     try {
       if (type === 'goal') {
         if (mode === 'create') {
-          await addFinalGoal(trimmedTitle, description, difficulty, targetDate);
+          await addFinalGoal(trimmedTitle, description, difficulty, targetDate, {
+            est_hours: estHours,
+            perceived_difficulty: perceivedDifficulty,
+            coeff_public: coeffPublic,
+            coeff_personal: coeffPersonal,
+            user_start_context: userStartContext,
+            ai_explanation: aiExplanation
+          });
         } else if (mode === 'edit' && goalToEdit) {
           await updateFinalGoal(goalToEdit.id, {
             title: trimmedTitle,
             description,
             difficulty,
-            target_date: targetDate
+            target_date: targetDate,
+            est_hours: estHours,
+            perceived_difficulty: perceivedDifficulty,
+            coeff_public: coeffPublic,
+            coeff_personal: coeffPersonal,
+            user_start_context: userStartContext,
+            ai_explanation: aiExplanation
           });
         }
       } else if (type === 'milestone') {
         if (mode === 'create' && parentId) {
-          await addMilestone(parentId, trimmedTitle, description, difficulty, targetDate);
+          const msId = await addMilestone(parentId, trimmedTitle, description, difficulty, targetDate, {
+            est_hours: estHours,
+            perceived_difficulty: perceivedDifficulty
+          });
+          // Auto create suggested subtasks
+          if (generatedSubtaskTitles.length > 0) {
+            for (const subtaskTitle of generatedSubtaskTitles) {
+              await addSubtask(msId, subtaskTitle);
+            }
+          }
         } else if (mode === 'edit' && milestoneToEdit) {
           await updateMilestone(milestoneToEdit.id, {
             title: trimmedTitle,
             description,
             difficulty,
-            target_date: targetDate
+            target_date: targetDate,
+            est_hours: estHours,
+            perceived_difficulty: perceivedDifficulty
           });
         }
       }
@@ -222,96 +276,418 @@ export const GoalFormModal: React.FC<GoalFormModalProps> = ({
             />
           </div>
 
-          {/* Target Date & Difficulty Row */}
+          {/* Target Date & Est Hours Row */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            
             {/* Target Date */}
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-med)', marginBottom: '6px' }}>
                 Date Cible
               </label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type="date"
-                  value={targetDate}
-                  onChange={(e) => setTargetDate(e.target.value)}
-                  required
-                  style={{
-                    width: '100%',
-                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: 'var(--border-radius-md)',
-                    padding: '12px 16px',
-                    fontSize: '0.9rem',
-                    outline: 'none',
-                    colorScheme: 'dark' // standard dark calendar browser UI
-                  }}
-                />
-              </div>
+              <input
+                type="date"
+                value={targetDate}
+                onChange={(e) => setTargetDate(e.target.value)}
+                required
+                style={{
+                  width: '100%',
+                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--border-radius-md)',
+                  padding: '12px 16px',
+                  fontSize: '0.9rem',
+                  outline: 'none',
+                  color: '#ffffff',
+                  colorScheme: 'dark'
+                }}
+              />
             </div>
 
-            {/* Interactive Difficulty segment clicker */}
+            {/* Est Hours */}
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-med)', marginBottom: '6px' }}>
-                Niveau de Difficulté
+                Heures Estimées ({estHours}h)
               </label>
-              <div style={{
-                display: 'flex',
-                height: '46px',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '0 12px',
-                backgroundColor: 'rgba(255,255,255,0.02)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--border-radius-md)'
-              }}>
-                {[1, 2, 3, 4, 5].map((level) => {
-                  const isActive = level <= difficulty;
-                  let color = 'rgba(255,255,255,0.1)';
-                  
-                  if (isActive) {
-                    if (difficulty === 1) color = 'var(--accent-success)';
-                    else if (difficulty === 2) color = 'var(--accent-secondary)';
-                    else if (difficulty === 3) color = 'var(--accent-warning)';
-                    else if (difficulty === 4) color = 'var(--accent-primary)';
-                    else color = 'var(--accent-danger)';
-                  }
+              <input
+                type="number"
+                min={1}
+                max={5000}
+                value={estHours}
+                onChange={(e) => setEstHours(Math.max(1, Number(e.target.value)))}
+                required
+                style={{
+                  width: '100%',
+                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--border-radius-md)',
+                  padding: '12px 16px',
+                  fontSize: '0.9rem',
+                  outline: 'none',
+                  color: '#ffffff'
+                }}
+              />
+            </div>
+          </div>
 
-                  return (
+          {/* User Starting Context (Goal Only) */}
+          {type === 'goal' && (
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-med)', marginBottom: '6px' }}>
+                Situation de départ / Contexte personnel
+              </label>
+              <textarea
+                value={userStartContext}
+                onChange={(e) => setUserStartContext(e.target.value)}
+                placeholder="Ex: Jamais couru (grand débutant), OU déjà bon niveau mais reprise..."
+                rows={2}
+                maxLength={200}
+                style={{
+                  width: '100%',
+                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--border-radius-md)',
+                  padding: '12px 16px',
+                  fontSize: '0.9rem',
+                  outline: 'none',
+                  resize: 'none',
+                  color: '#ffffff',
+                  transition: 'var(--transition-fast)'
+                }}
+                onFocus={(e) => e.currentTarget.style.borderColor = 'var(--accent-primary)'}
+                onBlur={(e) => e.currentTarget.style.borderColor = 'var(--border-color)'}
+              />
+            </div>
+          )}
+
+          {/* AI Helper trigger button */}
+          {type === 'goal' && aiConfig.apiKey && (
+            <div style={{ marginTop: '5px' }}>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!title.trim()) {
+                    setErrorMsg('Veuillez saisir un titre avant d\'évaluer avec l\'IA.');
+                    return;
+                  }
+                  setIsAiLoading(true);
+                  setErrorMsg('');
+                  try {
+                    const result = await evaluateGoalViaAi(
+                      title,
+                      description,
+                      estHours,
+                      perceivedDifficulty,
+                      userStartContext,
+                      aiConfig
+                    );
+                    setCoeffPublic(result.coeff_public);
+                    setCoeffPersonal(result.coeff_personal);
+                    setAiExplanation(
+                      `🌍 ${result.explanation_public}\n👤 ${result.explanation_personal}`
+                    );
+                  } catch (err: any) {
+                    setErrorMsg(err.message || 'Échec de la connexion IA.');
+                  } finally {
+                    setIsAiLoading(false);
+                  }
+                }}
+                disabled={isAiLoading}
+                style={{
+                  width: '100%',
+                  backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                  border: '1px solid var(--accent-primary)',
+                  color: 'var(--accent-primary)',
+                  borderRadius: 'var(--border-radius-md)',
+                  padding: '10px',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  boxShadow: '0 0 10px rgba(168, 85, 247, 0.1)'
+                }}
+              >
+                <Sparkles size={16} className={isAiLoading ? 'animate-spin' : ''} />
+                {isAiLoading ? 'Évaluation IA en cours...' : 'Évaluer & Calibrer via l\'IA'}
+              </button>
+            </div>
+          )}
+
+          {/* AI Subtasks trigger (Milestone Only) */}
+          {type === 'milestone' && aiConfig.apiKey && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!title.trim()) {
+                    setErrorMsg('Saisissez le titre de l\'étape avant de générer.');
+                    return;
+                  }
+                  setIsAiLoading(true);
+                  setErrorMsg('');
+                  try {
+                    const subtasks = await suggestSubtasksViaAi(title, description, aiConfig);
+                    setGeneratedSubtaskTitles(subtasks);
+                  } catch (err: any) {
+                    setErrorMsg(err.message || 'Échec de la génération de sous-tâches.');
+                  } finally {
+                    setIsAiLoading(false);
+                  }
+                }}
+                disabled={isAiLoading}
+                style={{
+                  width: '100%',
+                  backgroundColor: 'rgba(14, 165, 233, 0.1)',
+                  border: '1px solid var(--accent-secondary)',
+                  color: 'var(--accent-secondary)',
+                  borderRadius: 'var(--border-radius-md)',
+                  padding: '10px',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
+                }}
+              >
+                <Sparkles size={16} />
+                {isAiLoading ? 'Génération de tâches...' : 'Suggérer des sous-tâches via l\'IA'}
+              </button>
+
+              {generatedSubtaskTitles.length > 0 && (
+                <div style={{
+                  marginTop: '4px',
+                  backgroundColor: 'rgba(255,255,255,0.02)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--border-radius-md)',
+                  padding: '12px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <h5 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent-secondary)' }}>
+                      Tâches suggérées ({generatedSubtaskTitles.length})
+                    </h5>
                     <button
-                      key={level}
                       type="button"
-                      onClick={() => setDifficulty(level)}
-                      style={{
-                        width: '24px',
-                        height: '24px',
-                        borderRadius: '50%',
-                        backgroundColor: color,
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontSize: '0.72rem',
-                        fontWeight: 800,
-                        color: isActive ? '#ffffff' : 'var(--text-low)',
+                      onClick={() => setGeneratedSubtaskTitles([])}
+                      style={{ background: 'transparent', border: 'none', color: 'var(--accent-danger)', fontSize: '0.75rem', cursor: 'pointer' }}
+                    >
+                      Effacer tout
+                    </button>
+                  </div>
+                  <ul style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingLeft: 0, listStyle: 'none', margin: 0 }}>
+                    {generatedSubtaskTitles.map((st, idx) => (
+                      <li key={idx} style={{
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        transition: 'all 0.2s ease',
-                        boxShadow: isActive ? `0 0 10px ${color}` : 'none'
+                        justifyContent: 'space-between',
+                        backgroundColor: 'rgba(255,255,255,0.02)',
+                        padding: '6px 10px',
+                        borderRadius: 'var(--border-radius-sm)',
+                        fontSize: '0.8rem'
+                      }}>
+                        <span style={{ color: '#ffffff' }}>{st}</span>
+                        <button
+                          type="button"
+                          onClick={() => setGeneratedSubtaskTitles(prev => prev.filter((_, i) => i !== idx))}
+                          style={{ background: 'transparent', border: 'none', color: 'var(--text-low)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  
+                  {/* Temp subtask input */}
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                    <input
+                      type="text"
+                      value={tempSubtaskInput}
+                      onChange={(e) => setTempSubtaskInput(e.target.value)}
+                      placeholder="Ajouter une tâche manuelle..."
+                      style={{
+                        flex: 1,
+                        backgroundColor: 'rgba(255,255,255,0.01)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 'var(--border-radius-sm)',
+                        padding: '6px 10px',
+                        fontSize: '0.78rem',
+                        color: '#ffffff'
                       }}
-                      onMouseOver={(e) => {
-                        if (!isActive) e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.06)';
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (tempSubtaskInput.trim()) {
+                          setGeneratedSubtaskTitles(prev => [...prev, tempSubtaskInput.trim()]);
+                          setTempSubtaskInput('');
+                        }
                       }}
-                      onMouseOut={(e) => {
-                        if (!isActive) e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.02)';
+                      style={{
+                        backgroundColor: 'rgba(255,255,255,0.05)',
+                        border: '1px solid var(--border-color)',
+                        padding: '6px 10px',
+                        borderRadius: 'var(--border-radius-sm)',
+                        cursor: 'pointer',
+                        fontSize: '0.78rem',
+                        color: '#ffffff'
                       }}
                     >
-                      {level}
+                      Ajouter
                     </button>
-                  );
-                })}
-              </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Points Calibrator Section */}
+          <div style={{
+            backgroundColor: 'rgba(255,255,255,0.01)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--border-radius-lg)',
+            padding: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '14px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Calibrage des Points XP</span>
+              <span style={{
+                fontSize: '0.72rem',
+                backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                color: 'var(--accent-primary)',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                fontWeight: 600
+              }}>
+                Formule Active
+              </span>
             </div>
 
+            {/* Perceived Difficulty Selector */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-med)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  Difficulté Perçue
+                  <HelpCircle size={12} title="Votre sensation d'effort sur une échelle de 1 à 5." />
+                </label>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-warning)' }}>{perceivedDifficulty} / 5</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={5}
+                value={perceivedDifficulty}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setPerceivedDifficulty(val);
+                  setDifficulty(val); // Sync back to the base model difficulty too
+                }}
+                style={{ width: '100%', accentColor: 'var(--accent-warning)' }}
+              />
+            </div>
+
+            {type === 'goal' && (
+              <>
+                {/* Public Coefficient */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--text-med)' }}>
+                      🌍 Coefficient Public (Rareté globale)
+                    </label>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)' }}>x{coeffPublic.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1.0}
+                    max={3.0}
+                    step={0.1}
+                    value={coeffPublic}
+                    onChange={(e) => setCoeffPublic(Number(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--accent-primary)' }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: 'var(--text-low)', marginTop: '2px' }}>
+                    <span>1.0 (Simple)</span>
+                    <span>2.0 (Difficile)</span>
+                    <span>3.0 (Monde-Classe)</span>
+                  </div>
+                </div>
+
+                {/* Personal Coefficient */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--text-med)' }}>
+                      👤 Coefficient Personnel (Ajustement situation)
+                    </label>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-secondary)' }}>x{coeffPersonal.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.2}
+                    max={3.0}
+                    step={0.1}
+                    value={coeffPersonal}
+                    onChange={(e) => setCoeffPersonal(Number(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--accent-secondary)' }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: 'var(--text-low)', marginTop: '2px' }}>
+                    <span>0.5 (Pro/Expert)</span>
+                    <span>1.0 (Normal)</span>
+                    <span>3.0 (Énorme Défi Perso)</span>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Live Point Counter Visualizer */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-around',
+              alignItems: 'center',
+              backgroundColor: 'rgba(0,0,0,0.2)',
+              borderRadius: 'var(--border-radius-md)',
+              padding: '12px',
+              border: '1px solid rgba(255,255,255,0.02)',
+              marginTop: '4px'
+            }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '0.65rem', color: 'var(--text-low)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Points Absolus</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--accent-primary)', marginTop: '2px' }}>
+                  {Math.round(estHours * perceivedDifficulty * coeffPublic * 10)} XP
+                </div>
+              </div>
+              
+              {type === 'goal' && (
+                <>
+                  <div style={{ height: '30px', width: '1px', backgroundColor: 'rgba(255,255,255,0.05)' }} />
+                  
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-low)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Points Relatifs</div>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--accent-secondary)', marginTop: '2px' }}>
+                      {Math.round(estHours * perceivedDifficulty * coeffPublic * 10 * coeffPersonal)} XP
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            
+            {/* AI explanation card */}
+            {type === 'goal' && aiExplanation && (
+              <div style={{
+                fontSize: '0.75rem',
+                color: 'var(--text-med)',
+                backgroundColor: 'rgba(168, 85, 247, 0.03)',
+                border: '1px dashed rgba(168, 85, 247, 0.2)',
+                borderRadius: 'var(--border-radius-sm)',
+                padding: '10px',
+                lineHeight: 1.4,
+                whiteSpace: 'pre-wrap'
+              }}>
+                {aiExplanation}
+              </div>
+            )}
           </div>
 
           {errorMsg && (

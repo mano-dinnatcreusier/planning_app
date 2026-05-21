@@ -19,6 +19,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const { finalGoals, milestones, subtasks, deleteFinalGoal, loading, loadDemoData } = useGoals();
 
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [sortBy, setSortBy] = React.useState<'date_asc' | 'date_desc' | 'points_abs' | 'points_rel' | 'progress'>('date_asc');
+
   const handleFocusGoal = (goalId: string) => {
     setSelectedGoalId(goalId);
     setActiveTab('timeline');
@@ -32,6 +35,70 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const totalSubtasks = subtasks.length;
 
   const subtaskRatio = totalSubtasks > 0 ? Math.round((completedSubtasks / totalSubtasks) * 100) : 0;
+
+  // XP Gamification scoring sums
+  let totalXpAbsPotential = 0;
+  let totalXpRelPotential = 0;
+  let totalXpAbsEarned = 0;
+  let totalXpRelEarned = 0;
+
+  finalGoals.forEach(g => {
+    const abs = g.points_absolute || 0;
+    const rel = g.points_relative || 0;
+    totalXpAbsPotential += abs;
+    totalXpRelPotential += rel;
+    if (g.status === 'completed' || g.progress === 100) {
+      totalXpAbsEarned += abs;
+      totalXpRelEarned += rel;
+    }
+  });
+
+  milestones.forEach(m => {
+    const abs = m.points_absolute || 0;
+    const rel = m.points_relative || 0;
+    totalXpAbsPotential += abs;
+    totalXpRelPotential += rel;
+    if (m.status === 'completed') {
+      totalXpAbsEarned += abs;
+      totalXpRelEarned += rel;
+    }
+  });
+
+  // Filter & Sort list computation
+  const filteredAndSortedGoals = React.useMemo(() => {
+    let result = [...finalGoals];
+
+    // Search query filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(g =>
+        g.title.toLowerCase().includes(q) ||
+        (g.description || '').toLowerCase().includes(q)
+      );
+    }
+
+    // Sort order application
+    result.sort((a, b) => {
+      if (sortBy === 'date_asc') {
+        return new Date(a.target_date || '').getTime() - new Date(b.target_date || '').getTime();
+      }
+      if (sortBy === 'date_desc') {
+        return new Date(b.target_date || '').getTime() - new Date(a.target_date || '').getTime();
+      }
+      if (sortBy === 'points_abs') {
+        return (b.points_absolute || 0) - (a.points_absolute || 0);
+      }
+      if (sortBy === 'points_rel') {
+        return (b.points_relative || 0) - (a.points_relative || 0);
+      }
+      if (sortBy === 'progress') {
+        return (b.progress || 0) - (a.progress || 0);
+      }
+      return 0;
+    });
+
+    return result;
+  }, [finalGoals, searchQuery, sortBy]);
 
   // Date countdown helper
   const getDaysRemaining = (dateStr: string) => {
@@ -103,6 +170,77 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </button>
       </div>
 
+      {/* Gamified Trophy Wall / XP Panel */}
+      <div className="glass" style={{
+        padding: '24px',
+        borderRadius: 'var(--border-radius-lg)',
+        background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.05) 0%, rgba(99, 102, 241, 0.05) 50%, rgba(6, 182, 212, 0.05) 100%)',
+        border: '1px solid rgba(168, 85, 247, 0.15)',
+        boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.37)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{
+              backgroundColor: 'rgba(168, 85, 247, 0.15)',
+              padding: '12px',
+              borderRadius: '50%',
+              color: 'var(--accent-primary)',
+              animation: 'pulse-glow 2.5s infinite',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <Trophy size={26} />
+            </div>
+            <div>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>Mur des Trophées & Progression XP</h2>
+              <p style={{ color: 'var(--text-med)', fontSize: '0.8rem', marginTop: '2px', margin: 0 }}>
+                Accumulez de l'XP en complétant vos jalons et objectifs.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '20px' }}>
+            <div style={{ textAlign: 'right' }}>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-low)', textTransform: 'uppercase', fontWeight: 600 }}>XP Absolu Réalisé</span>
+              <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--accent-primary)', marginTop: '2px' }}>
+                {totalXpAbsEarned} <span style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-med)' }}>/ {totalXpAbsPotential} XP</span>
+              </div>
+            </div>
+            <div style={{ width: '1px', backgroundColor: 'rgba(255,255,255,0.05)' }} />
+            <div style={{ textAlign: 'right' }}>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-low)', textTransform: 'uppercase', fontWeight: 600 }}>XP Relatif Réalisé</span>
+              <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--accent-secondary)', marginTop: '2px' }}>
+                {totalXpRelEarned} <span style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-med)' }}>/ {totalXpRelPotential} XP</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Global XP Level Progress Bar */}
+        {totalXpAbsPotential > 0 ? (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-med)', marginBottom: '8px' }}>
+              <span>Niveau de Complétion XP (Absolu)</span>
+              <span>{Math.round((totalXpAbsEarned / totalXpAbsPotential) * 100)}% complété</span>
+            </div>
+            <div style={{ height: '8px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.02)' }}>
+              <div style={{
+                width: `${(totalXpAbsEarned / totalXpAbsPotential) * 100}%`,
+                height: '100%',
+                background: 'linear-gradient(90deg, var(--accent-primary) 0%, var(--accent-secondary) 100%)',
+                boxShadow: '0 0 12px var(--accent-primary)',
+                transition: 'width 0.6s cubic-bezier(0.16, 1, 0.3, 1)'
+              }} />
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-low)', textAlign: 'center', padding: '4px' }}>
+            Aucun point XP disponible. Créez un objectif pour initialiser votre jauge de progression.
+          </div>
+        )}
+      </div>
+
       {/* Stats Counter Row */}
       <div style={{
         display: 'grid',
@@ -115,7 +253,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
             backgroundColor: 'rgba(168, 85, 247, 0.1)',
             padding: '14px',
             borderRadius: 'var(--border-radius-md)',
-            color: 'var(--accent-primary)'
+            color: 'var(--accent-primary)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
           }}>
             <Trophy size={26} />
           </div>
@@ -136,7 +277,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
             backgroundColor: 'rgba(6, 182, 212, 0.1)',
             padding: '14px',
             borderRadius: 'var(--border-radius-md)',
-            color: 'var(--accent-secondary)'
+            color: 'var(--accent-secondary)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
           }}>
             <Calendar size={26} />
           </div>
@@ -155,7 +299,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
             backgroundColor: 'rgba(16, 185, 129, 0.1)',
             padding: '14px',
             borderRadius: 'var(--border-radius-md)',
-            color: 'var(--accent-success)'
+            color: 'var(--accent-success)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
           }}>
             <CheckSquare size={26} />
           </div>
@@ -233,10 +380,65 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* Grid Goals section */}
       <div>
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, letterSpacing: '-0.02em', marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span>Vos Objectifs principaux</span>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-low)', fontWeight: 500 }}>({totalGoals})</span>
-        </h3>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '16px',
+          marginBottom: '20px'
+        }}>
+          <h3 style={{ fontSize: '1.2rem', fontWeight: 700, letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+            <span>Vos Objectifs principaux</span>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-low)', fontWeight: 500 }}>({filteredAndSortedGoals.length})</span>
+          </h3>
+
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Search Input */}
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Rechercher un objectif..."
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 'var(--border-radius-md)',
+                padding: '8px 14px',
+                fontSize: '0.85rem',
+                color: '#ffffff',
+                outline: 'none',
+                width: '180px',
+                transition: 'all 0.2s ease'
+              }}
+              onFocus={(e) => e.currentTarget.style.borderColor = 'var(--accent-primary)'}
+              onBlur={(e) => e.currentTarget.style.borderColor = 'var(--border-color)'}
+            />
+
+            {/* Sort Selector */}
+            <select
+              value={sortBy}
+              onChange={(e: any) => setSortBy(e.target.value)}
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 'var(--border-radius-md)',
+                padding: '8px 14px',
+                fontSize: '0.85rem',
+                color: '#ffffff',
+                outline: 'none',
+                cursor: 'pointer',
+                colorScheme: 'dark'
+              }}
+            >
+              <option value="date_asc">📅 Date Cible (Proche)</option>
+              <option value="date_desc">📅 Date Cible (Lointaine)</option>
+              <option value="points_abs">🏆 Points Absolus (XP Max)</option>
+              <option value="points_rel">👤 Points Relatifs (XP Max)</option>
+              <option value="progress">📈 Progression (Max)</option>
+            </select>
+          </div>
+        </div>
 
         {totalGoals === 0 ? (
           /* Empty State Dashboard */
@@ -313,7 +515,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
             gap: '24px'
           }}>
-            {finalGoals.map(goal => {
+            {filteredAndSortedGoals.map(goal => {
               const progress = goal.progress || 0;
               const daysInfo = getDaysRemaining(goal.target_date);
               
@@ -351,8 +553,38 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 >
                   {/* Top: title, difficulty and dates */}
                   <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '8px' }}>
-                      <DifficultyIndicator level={goal.difficulty} showLabel={false} />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <DifficultyIndicator level={goal.difficulty} showLabel={false} />
+                        
+                        {goal.points_absolute !== undefined && (
+                          <span style={{
+                            fontSize: '0.62rem',
+                            fontWeight: 700,
+                            backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                            color: 'var(--accent-primary)',
+                            padding: '2px 8px',
+                            borderRadius: '10px',
+                            border: '1px solid rgba(168, 85, 247, 0.15)'
+                          }} title="Points XP Absolus (Difficulté globale)">
+                            {goal.points_absolute} XP Abs.
+                          </span>
+                        )}
+
+                        {goal.points_relative !== undefined && (
+                          <span style={{
+                            fontSize: '0.62rem',
+                            fontWeight: 700,
+                            backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                            color: 'var(--accent-secondary)',
+                            padding: '2px 8px',
+                            borderRadius: '10px',
+                            border: '1px solid rgba(6, 182, 212, 0.15)'
+                          }} title="Points XP Relatifs (Ajustés à votre situation)">
+                            {goal.points_relative} XP Rel.
+                          </span>
+                        )}
+                      </div>
                       
                       {daysInfo && (
                         <span

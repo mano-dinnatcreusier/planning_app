@@ -7,6 +7,16 @@ export interface FinalGoal {
   status: 'pending' | 'in_progress' | 'completed';
   created_at: string;
   progress?: number; // Calculated dynamic field (0-100)
+  
+  // Points System Fields
+  est_hours?: number;
+  perceived_difficulty?: number;
+  coeff_public?: number;
+  coeff_personal?: number;
+  points_absolute?: number;
+  points_relative?: number;
+  user_start_context?: string;
+  ai_explanation?: string;
 }
 
 export interface Milestone {
@@ -20,6 +30,12 @@ export interface Milestone {
   status: 'pending' | 'in_progress' | 'completed';
   created_at: string;
   progress?: number; // Calculated dynamic field (0-100)
+
+  // Points System Fields (calculated or inherited)
+  est_hours?: number;
+  perceived_difficulty?: number;
+  points_absolute?: number;
+  points_relative?: number;
 }
 
 export interface Subtask {
@@ -35,3 +51,10 @@ export interface SupabaseConfig {
   url: string;
   anonKey: string;
 }
+
+export interface AiConfig {
+  url: string;
+  apiKey: string;
+  model: string;
+}
+

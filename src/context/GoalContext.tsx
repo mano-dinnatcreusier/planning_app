@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { FinalGoal, Milestone, Subtask } from '../types';
+import type { FinalGoal, Milestone, Subtask, AiConfig } from '../types';
 import { getSupabase, initSupabaseClient, getSupabaseConfig } from '../utils/supabaseClient';
+import { getAiConfig, saveAiConfigInStorage } from '../utils/aiClient';
 
 interface GoalContextType {
   finalGoals: FinalGoal[];
@@ -9,12 +10,13 @@ interface GoalContextType {
   loading: boolean;
   isSupabaseConnected: boolean;
   supabaseConfig: { url: string; anonKey: string };
+  aiConfig: AiConfig;
   // Final Goals CRUD
-  addFinalGoal: (title: string, description: string, difficulty: number, targetDate: string) => Promise<void>;
+  addFinalGoal: (title: string, description: string, difficulty: number, targetDate: string, scoringFields?: Partial<FinalGoal>) => Promise<string>;
   updateFinalGoal: (id: string, updates: Partial<FinalGoal>) => Promise<void>;
   deleteFinalGoal: (id: string) => Promise<void>;
   // Milestones CRUD
-  addMilestone: (finalGoalId: string, title: string, description: string, difficulty: number, targetDate: string) => Promise<void>;
+  addMilestone: (finalGoalId: string, title: string, description: string, difficulty: number, targetDate: string, scoringFields?: Partial<Milestone>) => Promise<string>;
   updateMilestone: (id: string, updates: Partial<Milestone>) => Promise<void>;
   deleteMilestone: (id: string) => Promise<void>;
   reorderMilestones: (finalGoalId: string, orderedMilestoneIds: string[]) => Promise<void>;
@@ -24,6 +26,7 @@ interface GoalContextType {
   deleteSubtask: (id: string) => Promise<void>;
   // Config & Demo Data
   saveSupabaseConfig: (url: string, key: string) => Promise<boolean>;
+  saveAiConfig: (url: string, apiKey: string, model: string) => Promise<void>;
   clearDatabase: () => Promise<void>;
   loadDemoData: () => Promise<void>;
 }
@@ -37,6 +40,28 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
   const [isSupabaseConnected, setIsSupabaseConnected] = useState<boolean>(false);
   const [supabaseConfig, setSupabaseConfig] = useState(getSupabaseConfig());
+  const [aiConfig, setAiConfig] = useState(getAiConfig());
+
+  // Points helper calculations
+  const calculateFinalGoalPoints = (goal: Partial<FinalGoal>) => {
+    const h = goal.est_hours ?? 10;
+    const d = goal.perceived_difficulty ?? goal.difficulty ?? 3;
+    const cPub = goal.coeff_public ?? 1.5;
+    const cPers = goal.coeff_personal ?? 1.0;
+    const points_absolute = Math.round(h * d * cPub * 10);
+    const points_relative = Math.round(points_absolute * cPers);
+    return { points_absolute, points_relative };
+  };
+
+  const calculateMilestonePoints = (ms: Partial<Milestone>, parentGoal?: FinalGoal) => {
+    const h = ms.est_hours ?? 2;
+    const d = ms.perceived_difficulty ?? ms.difficulty ?? 3;
+    const cPub = parentGoal?.coeff_public ?? 1.5;
+    const cPers = parentGoal?.coeff_personal ?? 1.0;
+    const points_absolute = Math.round(h * d * cPub * 10);
+    const points_relative = Math.round(points_absolute * cPers);
+    return { points_absolute, points_relative };
+  };
 
   // Check connection status
   useEffect(() => {
@@ -144,7 +169,24 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const computedFinalGoals = getComputedFinalGoals(finalGoals, computedMilestones);
 
   // --- FINAL GOALS CRUD ---
-  const addFinalGoal = async (title: string, description: string, difficulty: number, targetDate: string) => {
+  const addFinalGoal = async (
+    title: string,
+    description: string,
+    difficulty: number,
+    targetDate: string,
+    scoringFields?: Partial<FinalGoal>
+  ) => {
+    const baseGoal: Partial<FinalGoal> = {
+      est_hours: 10,
+      perceived_difficulty: difficulty,
+      coeff_public: 1.5,
+      coeff_personal: 1.0,
+      user_start_context: '',
+      ai_explanation: '',
+      ...scoringFields
+    };
+    const { points_absolute, points_relative } = calculateFinalGoalPoints(baseGoal);
+
     const newGoal: FinalGoal = {
       id: crypto.randomUUID(),
       title,
@@ -152,7 +194,10 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       difficulty,
       target_date: targetDate || new Date().toISOString().split('T')[0],
       status: 'pending',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      ...baseGoal,
+      points_absolute,
+      points_relative
     };
 
     const supabase = getSupabase();
@@ -167,16 +212,32 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setFinalGoals(nextGoals);
       syncToLocalStorage(nextGoals, milestones, subtasks);
     }
+    return newGoal.id;
   };
 
   const updateFinalGoal = async (id: string, updates: Partial<FinalGoal>) => {
+    const current = finalGoals.find(g => g.id === id);
+    let finalUpdates = { ...updates };
+    
+    if (
+      updates.est_hours !== undefined ||
+      updates.perceived_difficulty !== undefined ||
+      updates.coeff_public !== undefined ||
+      updates.coeff_personal !== undefined ||
+      updates.difficulty !== undefined
+    ) {
+      const merged = { ...current, ...updates };
+      const { points_absolute, points_relative } = calculateFinalGoalPoints(merged);
+      finalUpdates = { ...finalUpdates, points_absolute, points_relative };
+    }
+
     const supabase = getSupabase();
     if (supabase) {
-      const { error } = await supabase.from('final_goals').update(updates).eq('id', id);
+      const { error } = await supabase.from('final_goals').update(finalUpdates).eq('id', id);
       if (error) throw error;
-      setFinalGoals(prev => prev.map(g => g.id === id ? { ...g, ...updates } : g));
+      setFinalGoals(prev => prev.map(g => g.id === id ? { ...g, ...finalUpdates } : g));
     } else {
-      const nextGoals = finalGoals.map(g => g.id === id ? { ...g, ...updates } : g);
+      const nextGoals = finalGoals.map(g => g.id === id ? { ...g, ...finalUpdates } : g);
       setFinalGoals(nextGoals);
       syncToLocalStorage(nextGoals, milestones, subtasks);
     }
@@ -206,7 +267,22 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // --- MILESTONES CRUD ---
-  const addMilestone = async (finalGoalId: string, title: string, description: string, difficulty: number, targetDate: string) => {
+  const addMilestone = async (
+    finalGoalId: string,
+    title: string,
+    description: string,
+    difficulty: number,
+    targetDate: string,
+    scoringFields?: Partial<Milestone>
+  ) => {
+    const parentGoal = finalGoals.find(g => g.id === finalGoalId);
+    const baseMs: Partial<Milestone> = {
+      est_hours: 2,
+      perceived_difficulty: difficulty,
+      ...scoringFields
+    };
+    const { points_absolute, points_relative } = calculateMilestonePoints(baseMs, parentGoal);
+
     const goalMs = milestones.filter(m => m.final_goal_id === finalGoalId);
     const newMs: Milestone = {
       id: crypto.randomUUID(),
@@ -217,7 +293,10 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       order_index: goalMs.length,
       target_date: targetDate || new Date().toISOString().split('T')[0],
       status: 'pending',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      ...baseMs,
+      points_absolute,
+      points_relative
     };
 
     const supabase = getSupabase();
@@ -231,16 +310,31 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setMilestones(nextMs);
       syncToLocalStorage(finalGoals, nextMs, subtasks);
     }
+    return newMs.id;
   };
 
   const updateMilestone = async (id: string, updates: Partial<Milestone>) => {
+    const current = milestones.find(m => m.id === id);
+    const parentGoal = finalGoals.find(g => g.id === (updates.final_goal_id || current?.final_goal_id));
+    let finalUpdates = { ...updates };
+
+    if (
+      updates.est_hours !== undefined ||
+      updates.perceived_difficulty !== undefined ||
+      updates.difficulty !== undefined
+    ) {
+      const merged = { ...current, ...updates };
+      const { points_absolute, points_relative } = calculateMilestonePoints(merged, parentGoal);
+      finalUpdates = { ...finalUpdates, points_absolute, points_relative };
+    }
+
     const supabase = getSupabase();
     if (supabase) {
-      const { error } = await supabase.from('milestones').update(updates).eq('id', id);
+      const { error } = await supabase.from('milestones').update(finalUpdates).eq('id', id);
       if (error) throw error;
-      setMilestones(prev => prev.map(m => m.id === id ? { ...m, ...updates } : m));
+      setMilestones(prev => prev.map(m => m.id === id ? { ...m, ...finalUpdates } : m));
     } else {
-      const nextMs = milestones.map(m => m.id === id ? { ...m, ...updates } : m);
+      const nextMs = milestones.map(m => m.id === id ? { ...m, ...finalUpdates } : m);
       setMilestones(nextMs);
       syncToLocalStorage(finalGoals, nextMs, subtasks);
     }
@@ -576,6 +670,12 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(false);
   };
 
+  const saveAiConfig = async (url: string, apiKey: string, model: string) => {
+    const config = { url, apiKey, model };
+    saveAiConfigInStorage(config);
+    setAiConfig(config);
+  };
+
   return (
     <GoalContext.Provider
       value={{
@@ -585,6 +685,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         isSupabaseConnected,
         supabaseConfig,
+        aiConfig,
         addFinalGoal,
         updateFinalGoal,
         deleteFinalGoal,
@@ -596,6 +697,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         toggleSubtask,
         deleteSubtask,
         saveSupabaseConfig,
+        saveAiConfig,
         clearDatabase,
         loadDemoData
       }}
