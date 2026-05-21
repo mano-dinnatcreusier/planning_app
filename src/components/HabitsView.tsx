@@ -162,6 +162,33 @@ export const HabitsView: React.FC = () => {
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       
+      {/* Responsive Styles Injection */}
+      <style>{`
+        @media (max-width: 1024px) {
+          .habits-grid-layout {
+            flex-direction: column !important;
+          }
+          .habits-left-panel, .habits-right-panel {
+            flex: 1 1 100% !important;
+            width: 100% !important;
+          }
+        }
+        @media (max-width: 640px) {
+          .habit-card {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 16px !important;
+            padding: 16px !important;
+          }
+          .habit-card-right-container {
+            width: 100% !important;
+            justify-content: space-between !important;
+            border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+            padding-top: 14px !important;
+          }
+        }
+      `}</style>
+
       {/* Habits Header Title */}
       <div>
         <h1 style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.03em', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -174,10 +201,10 @@ export const HabitsView: React.FC = () => {
       </div>
 
       {/* Grid Layout */}
-      <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+      <div className="habits-grid-layout" style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
         
         {/* LEFT PANEL: Active Habits List (Flex 60%) */}
-        <div style={{ flex: '1 1 58%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div className="habits-left-panel" style={{ flex: '1 1 58%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 700, margin: '0 0 4px 0', color: '#ffffff' }}>
             Mes Routines Actives ({habits.length})
           </h2>
@@ -210,7 +237,7 @@ export const HabitsView: React.FC = () => {
                 return (
                   <div 
                     key={h.id} 
-                    className="glass-interactive" 
+                    className="habit-card glass-interactive" 
                     style={{ 
                       borderRadius: 'var(--border-radius-lg)', 
                       padding: '20px', 
@@ -293,7 +320,7 @@ export const HabitsView: React.FC = () => {
                     </div>
 
                     {/* Right: Circle progress ring & actions */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                    <div className="habit-card-right-container" style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
                       
                       {/* RPG Tracker Ring */}
                       <div style={{ position: 'relative', width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title={`Taux de réussite : ${compliance}%`}>
@@ -373,7 +400,7 @@ export const HabitsView: React.FC = () => {
         </div>
 
         {/* RIGHT PANEL: Creation & AI Assistant Form (Flex 35%) */}
-        <div style={{ flex: '1 1 35%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div className="habits-right-panel" style={{ flex: '1 1 35%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           
           {/* Panel Selector Mode Header */}
           <div style={{
