@@ -79,6 +79,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { points_absolute, points_relative };
   };
 
+  const [authInitialized, setAuthInitialized] = useState<boolean>(false);
+
   // Check connection status & retrieve session
   useEffect(() => {
     const supabase = getSupabase();
@@ -88,21 +90,29 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Get initial session
       supabase.auth.getSession().then(({ data: { session } }) => {
         setUser(session?.user ?? null);
+        setAuthInitialized(true);
+      }).catch(() => {
+        setAuthInitialized(true);
       });
 
       // Listen to auth changes
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
         setUser(session?.user ?? null);
+        setAuthInitialized(true);
       });
 
       return () => subscription.unsubscribe();
+    } else {
+      setAuthInitialized(true);
     }
   }, [supabaseConfig.url, supabaseConfig.anonKey]);
 
   // Load data when connection or user state changes
   useEffect(() => {
-    loadAllData();
-  }, [isSupabaseConnected, user]);
+    if (authInitialized) {
+      loadAllData();
+    }
+  }, [isSupabaseConnected, user, authInitialized]);
 
   // Read data
   const loadAllData = async () => {
@@ -151,8 +161,66 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
           throw new Error('Supabase fetch error');
         }
 
-        const validFgData = fgData || [];
-        const validHbData = hbData || [];
+        let validFgData = fgData || [];
+        let validHbData = hbData || [];
+
+        // If the cloud account has no goals and no habits, let's migrate any existing local goals/habits
+        if (validFgData.length === 0 && validHbData.length === 0) {
+          const fgLocalStr = localStorage.getItem('fg_goals');
+          const msLocalStr = localStorage.getItem('fg_milestones');
+          const stLocalStr = localStorage.getItem('fg_subtasks');
+          const hbLocalStr = localStorage.getItem('fg_habits');
+          const hblLocalStr = localStorage.getItem('fg_habit_logs');
+
+          const localFg = fgLocalStr ? JSON.parse(fgLocalStr) : [];
+          const localMs = msLocalStr ? JSON.parse(msLocalStr) : [];
+          const localSt = stLocalStr ? JSON.parse(stLocalStr) : [];
+          const localHb = hbLocalStr ? JSON.parse(hbLocalStr) : [];
+          const localHbl = hblLocalStr ? JSON.parse(hblLocalStr) : [];
+
+          if (localFg.length > 0 || localHb.length > 0) {
+            console.log("Migrating local storage data to the cloud for user id:", userId);
+            
+            // 1. Upload Goals
+            if (localFg.length > 0) {
+              const goalsToUpload = localFg.map((g: any) => ({ ...g, user_id: userId }));
+              await supabase.from('final_goals').insert(goalsToUpload);
+            }
+            // 2. Upload Milestones
+            if (localMs.length > 0) {
+              await supabase.from('milestones').insert(localMs);
+            }
+            // 3. Upload Subtasks
+            if (localSt.length > 0) {
+              await supabase.from('subtasks').insert(localSt);
+            }
+            // 4. Upload Habits
+            if (localHb.length > 0) {
+              const habitsToUpload = localHb.map((h: any) => ({ ...h, user_id: userId }));
+              await supabase.from('habits').insert(habitsToUpload);
+            }
+            // 5. Upload Habit Logs
+            if (localHbl.length > 0) {
+              await supabase.from('habit_logs').insert(localHbl);
+            }
+
+            // Re-fetch since we just migrated!
+            const { data: refetchedFg } = await supabase
+              .from('final_goals')
+              .select('*')
+              .eq('user_id', userId)
+              .order('created_at', { ascending: false });
+
+            const { data: refetchedHb } = await supabase
+              .from('habits')
+              .select('*')
+              .eq('user_id', userId)
+              .order('created_at', { ascending: false });
+
+            validFgData = refetchedFg || [];
+            validHbData = refetchedHb || [];
+          }
+        }
 
         // Fetch Milestones
         let msData: Milestone[] = [];
@@ -966,7 +1034,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         subtasks,
         habits,
         habitLogs,
-        loading,
+        loading: loading || !authInitialized,
         isSupabaseConnected,
         supabaseConfig,
         aiConfig,

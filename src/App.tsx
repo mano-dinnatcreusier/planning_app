@@ -26,6 +26,8 @@ const MainApp: React.FC = () => {
   useEffect(() => {
     if (!loading && !user) {
       setIsLoginOpen(true);
+    } else if (user) {
+      setIsLoginOpen(false);
     }
   }, [user, loading]);
   
