@@ -164,62 +164,68 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         let validFgData = fgData || [];
         let validHbData = hbData || [];
 
-        // If the cloud account has no goals and no habits, let's migrate any existing local goals/habits
-        if (validFgData.length === 0 && validHbData.length === 0) {
+        // Migrate goals and habits independently to the cloud
+        let migrated = false;
+
+        if (validFgData.length === 0) {
           const fgLocalStr = localStorage.getItem('fg_goals');
           const msLocalStr = localStorage.getItem('fg_milestones');
           const stLocalStr = localStorage.getItem('fg_subtasks');
-          const hbLocalStr = localStorage.getItem('fg_habits');
-          const hblLocalStr = localStorage.getItem('fg_habit_logs');
 
           const localFg = fgLocalStr ? JSON.parse(fgLocalStr) : [];
           const localMs = msLocalStr ? JSON.parse(msLocalStr) : [];
           const localSt = stLocalStr ? JSON.parse(stLocalStr) : [];
-          const localHb = hbLocalStr ? JSON.parse(hbLocalStr) : [];
-          const localHbl = hblLocalStr ? JSON.parse(hblLocalStr) : [];
 
-          if (localFg.length > 0 || localHb.length > 0) {
-            console.log("Migrating local storage data to the cloud for user id:", userId);
-            
-            // 1. Upload Goals
-            if (localFg.length > 0) {
-              const goalsToUpload = localFg.map((g: any) => ({ ...g, user_id: userId }));
-              await supabase.from('final_goals').insert(goalsToUpload);
-            }
-            // 2. Upload Milestones
+          if (localFg.length > 0) {
+            console.log("Migrating local storage goals to the cloud for user id:", userId);
+            const goalsToUpload = localFg.map((g: any) => ({ ...g, user_id: userId }));
+            await supabase.from('final_goals').insert(goalsToUpload);
+
             if (localMs.length > 0) {
               await supabase.from('milestones').insert(localMs);
             }
-            // 3. Upload Subtasks
             if (localSt.length > 0) {
               await supabase.from('subtasks').insert(localSt);
             }
-            // 4. Upload Habits
-            if (localHb.length > 0) {
-              const habitsToUpload = localHb.map((h: any) => ({ ...h, user_id: userId }));
-              await supabase.from('habits').insert(habitsToUpload);
-            }
-            // 5. Upload Habit Logs
+            migrated = true;
+          }
+        }
+
+        if (validHbData.length === 0) {
+          const hbLocalStr = localStorage.getItem('fg_habits');
+          const hblLocalStr = localStorage.getItem('fg_habit_logs');
+
+          const localHb = hbLocalStr ? JSON.parse(hbLocalStr) : [];
+          const localHbl = hblLocalStr ? JSON.parse(hblLocalStr) : [];
+
+          if (localHb.length > 0) {
+            console.log("Migrating local storage habits to the cloud for user id:", userId);
+            const habitsToUpload = localHb.map((h: any) => ({ ...h, user_id: userId }));
+            await supabase.from('habits').insert(habitsToUpload);
+
             if (localHbl.length > 0) {
               await supabase.from('habit_logs').insert(localHbl);
             }
-
-            // Re-fetch since we just migrated!
-            const { data: refetchedFg } = await supabase
-              .from('final_goals')
-              .select('*')
-              .eq('user_id', userId)
-              .order('created_at', { ascending: false });
-
-            const { data: refetchedHb } = await supabase
-              .from('habits')
-              .select('*')
-              .eq('user_id', userId)
-              .order('created_at', { ascending: false });
-
-            validFgData = refetchedFg || [];
-            validHbData = refetchedHb || [];
+            migrated = true;
           }
+        }
+
+        if (migrated) {
+          // Re-fetch since we just migrated!
+          const { data: refetchedFg } = await supabase
+            .from('final_goals')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+
+          const { data: refetchedHb } = await supabase
+            .from('habits')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+
+          validFgData = refetchedFg || [];
+          validHbData = refetchedHb || [];
         }
 
         // Fetch Milestones

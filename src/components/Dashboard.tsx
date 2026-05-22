@@ -142,6 +142,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+      <style>{`
+        @media (max-width: 640px) {
+          .xp-absolute-relative-row {
+            flex-direction: column !important;
+            gap: 12px !important;
+            align-items: flex-start !important;
+            width: 100% !important;
+          }
+          .xp-absolute-relative-row > div {
+            text-align: left !important;
+          }
+          .xp-absolute-relative-row > .xp-separator {
+            display: none !important;
+          }
+        }
+      `}</style>
       
       {/* Welcome Title */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
@@ -208,14 +224,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '20px' }}>
+          <div className="xp-absolute-relative-row" style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
             <div style={{ textAlign: 'right' }}>
               <span style={{ fontSize: '0.72rem', color: 'var(--text-low)', textTransform: 'uppercase', fontWeight: 600 }}>XP Absolu Réalisé</span>
               <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--accent-primary)', marginTop: '2px' }}>
                 {totalXpAbsEarned} <span style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-med)' }}>/ {totalXpAbsPotential} XP</span>
               </div>
             </div>
-            <div style={{ width: '1px', backgroundColor: 'rgba(255,255,255,0.05)' }} />
+            <div className="xp-separator" style={{ width: '1px', backgroundColor: 'rgba(255,255,255,0.05)' }} />
             <div style={{ textAlign: 'right' }}>
               <span style={{ fontSize: '0.72rem', color: 'var(--text-low)', textTransform: 'uppercase', fontWeight: 600 }}>XP Relatif Réalisé</span>
               <div style={{ fontSize: '1.5rem', fontWeight: 900, color: 'var(--accent-secondary)', marginTop: '2px' }}>
@@ -521,7 +537,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           /* Grid list items */
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
             gap: '24px'
           }}>
             {filteredAndSortedGoals.map(goal => {
