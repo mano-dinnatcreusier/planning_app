@@ -286,7 +286,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const supabase = getSupabase();
     if (!supabase) throw new Error("Base de données non configurée.");
 
-    const email = username.includes('@') ? username.trim() : `${username.trim().toLowerCase()}@gmail.com`;
+    const email = username.includes('@') ? username.trim() : `${username.trim().toLowerCase()}@planning.app`;
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password
@@ -300,7 +300,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const supabase = getSupabase();
     if (!supabase) throw new Error("Base de données non configurée.");
 
-    const email = username.includes('@') ? username.trim() : `${username.trim().toLowerCase()}@gmail.com`;
+    const email = username.includes('@') ? username.trim() : `${username.trim().toLowerCase()}@planning.app`;
     
     // Sign up user
     const { data, error } = await supabase.auth.signUp({

@@ -18,9 +18,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     clearDatabase,
     loadDemoData,
     user,
-    logout,
-    finalGoals,
-    habits
+    logout
   } = useGoals();
 
   const [url, setUrl] = useState(supabaseConfig.url);
@@ -37,11 +35,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMessage(null);
-    
+
     // Save configurations
     const dbSuccess = await saveSupabaseConfig(url, anonKey);
     await saveAiConfig(aiUrl, aiApiKey, aiModel);
-    
+
     if (url && anonKey) {
       if (dbSuccess) {
         setStatusMessage({ text: 'Configuration DB & IA enregistrée et connectée !', error: false });
@@ -319,9 +317,6 @@ CREATE TABLE IF NOT EXISTS user_profiles (
                       {user.email ? user.email.split('@')[0] : 'Utilisateur'}
                     </h4>
                     <span style={{ fontSize: '0.7rem', color: 'var(--text-low)' }}>Compte Cloud Actif</span>
-                    <span style={{ fontSize: '0.68rem', color: 'var(--accent-primary)', marginTop: '4px', fontWeight: 600 }}>
-                      📊 {finalGoals.length} objectifs, {habits.length} habitudes chargés
-                    </span>
                   </div>
                 </div>
                 <button
@@ -601,7 +596,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '24px', marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
             <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>Configuration SQL Supabase</h3>
-            
+
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <button
                 onClick={copySQL}
