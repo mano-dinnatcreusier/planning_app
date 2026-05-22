@@ -127,6 +127,7 @@ const MainApp: React.FC = () => {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        openLogin={() => setIsLoginOpen(true)}
       />
 
       {/* 5. Global Goal / Milestone CRUD Form Modal */}

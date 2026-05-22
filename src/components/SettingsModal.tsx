@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { useGoals } from '../context/GoalContext';
-import { Database, X, CheckCircle, AlertTriangle, Copy, Check, Sparkles } from 'lucide-react';
+import { Database, X, CheckCircle, AlertTriangle, Copy, Check, Sparkles, User, LogOut } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  openLogin?: () => void;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, openLogin }) => {
   const {
     supabaseConfig,
     isSupabaseConnected,
@@ -15,7 +16,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     aiConfig,
     saveAiConfig,
     clearDatabase,
-    loadDemoData
+    loadDemoData,
+    user,
+    logout
   } = useGoals();
 
   const [url, setUrl] = useState(supabaseConfig.url);
@@ -275,6 +278,119 @@ CREATE TABLE IF NOT EXISTS user_profiles (
             </>
           )}
         </div>
+
+        {/* User Account / Login State for Mobile & general access */}
+        {isSupabaseConnected && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '14px',
+              padding: '16px',
+              borderRadius: 'var(--border-radius-md)',
+              backgroundColor: 'rgba(255, 255, 255, 0.02)',
+              border: '1px solid var(--border-color)',
+              marginBottom: '24px'
+            }}
+          >
+            {user ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.95rem',
+                    fontWeight: 700,
+                    textTransform: 'capitalize'
+                  }}>
+                    {user.email ? user.email.split('@')[0][0] : 'U'}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <h4 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>
+                      {user.email ? user.email.split('@')[0] : 'Utilisateur'}
+                    </h4>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-low)' }}>Compte Cloud Actif</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    logout();
+                    onClose();
+                  }}
+                  style={{
+                    backgroundColor: 'rgba(244, 63, 94, 0.08)',
+                    border: '1px solid rgba(244, 63, 94, 0.2)',
+                    color: '#fb7185',
+                    borderRadius: 'var(--border-radius-sm)',
+                    padding: '6px 12px',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    transition: 'var(--transition-fast)'
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.15)'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.08)'; }}
+                >
+                  <LogOut size={12} />
+                  Déconnexion
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    color: 'var(--text-med)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <User size={16} />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <h4 style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-med)', margin: 0 }}>Non connecté</h4>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-low)' }}>Vos données ne sont pas synchronisées.</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    onClose();
+                    if (openLogin) openLogin();
+                  }}
+                  style={{
+                    backgroundColor: 'var(--accent-primary)',
+                    border: 'none',
+                    color: '#ffffff',
+                    borderRadius: 'var(--border-radius-sm)',
+                    padding: '8px 14px',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'var(--transition-fast)',
+                    boxShadow: 'var(--shadow-neon-primary)'
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.filter = 'brightness(1.15)'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.filter = 'none'; }}
+                >
+                  Se connecter
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Input credentials Form */}
         <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '30px' }}>
