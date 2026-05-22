@@ -6,8 +6,14 @@ let supabaseInstance: SupabaseClient | null = null;
  * Retrieves the currently active Supabase configuration (either from localStorage or env variables)
  */
 export const getSupabaseConfig = () => {
-  const localUrl = localStorage.getItem('supabase_url');
-  const localKey = localStorage.getItem('supabase_anon_key');
+  let localUrl = '';
+  let localKey = '';
+  try {
+    localUrl = localStorage.getItem('supabase_url') || '';
+    localKey = localStorage.getItem('supabase_anon_key') || '';
+  } catch (e) {
+    console.warn('localStorage is not accessible in this context:', e);
+  }
   
   const envUrl = import.meta.env.VITE_SUPABASE_URL;
   const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -57,7 +63,11 @@ export const getSupabase = (): SupabaseClient | null => {
  * Clears keys from localStorage and resets the client
  */
 export const clearSupabaseConfig = () => {
-  localStorage.removeItem('supabase_url');
-  localStorage.removeItem('supabase_anon_key');
+  try {
+    localStorage.removeItem('supabase_url');
+    localStorage.removeItem('supabase_anon_key');
+  } catch (e) {
+    console.warn('localStorage is not accessible for removing config:', e);
+  }
   supabaseInstance = null;
 };

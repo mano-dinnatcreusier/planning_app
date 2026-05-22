@@ -117,168 +117,193 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Read data
   const loadAllData = async () => {
     setLoading(true);
-    const supabase = getSupabase();
+    try {
+      const supabase = getSupabase();
 
-    if (supabase && user) {
-      try {
-        const userId = user.id;
-
-        // Load deepseek settings from cloud profile
+      if (supabase && user) {
         try {
-          const { data: profileData } = await supabase
-            .from('user_profiles')
-            .select('*')
-            .eq('user_id', userId)
-            .maybeSingle();
+          const userId = user.id;
 
-          if (profileData) {
-            const loadedAiConfig = {
-              url: 'https://api.deepseek.com/v1',
-              apiKey: profileData.ai_api_key || '',
-              model: profileData.ai_model || 'deepseek-chat'
-            };
-            setAiConfig(loadedAiConfig);
-            saveAiConfigInStorage(loadedAiConfig);
-          }
-        } catch (profileErr) {
-          console.warn("User profile loading failed:", profileErr);
-        }
+          // Load deepseek settings from cloud profile
+          try {
+            const { data: profileData } = await supabase
+              .from('user_profiles')
+              .select('*')
+              .eq('user_id', userId)
+              .maybeSingle();
 
-        // Fetch from Supabase cloud (user-filtered)
-        const { data: fgData, error: fgErr } = await supabase
-          .from('final_goals')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false });
-
-        const { data: hbData, error: hbErr } = await supabase
-          .from('habits')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false });
-
-        if (fgErr || hbErr) {
-          throw new Error('Supabase fetch error');
-        }
-
-        let validFgData = fgData || [];
-        let validHbData = hbData || [];
-
-        // Migrate goals and habits independently to the cloud
-        let migrated = false;
-
-        if (validFgData.length === 0) {
-          const fgLocalStr = localStorage.getItem('fg_goals');
-          const msLocalStr = localStorage.getItem('fg_milestones');
-          const stLocalStr = localStorage.getItem('fg_subtasks');
-
-          const localFg = fgLocalStr ? JSON.parse(fgLocalStr) : [];
-          const localMs = msLocalStr ? JSON.parse(msLocalStr) : [];
-          const localSt = stLocalStr ? JSON.parse(stLocalStr) : [];
-
-          if (localFg.length > 0) {
-            console.log("Migrating local storage goals to the cloud for user id:", userId);
-            const goalsToUpload = localFg.map((g: any) => ({ ...g, user_id: userId }));
-            await supabase.from('final_goals').insert(goalsToUpload);
-
-            if (localMs.length > 0) {
-              await supabase.from('milestones').insert(localMs);
+            if (profileData) {
+              const loadedAiConfig = {
+                url: 'https://api.deepseek.com/v1',
+                apiKey: profileData.ai_api_key || '',
+                model: profileData.ai_model || 'deepseek-chat'
+              };
+              setAiConfig(loadedAiConfig);
+              saveAiConfigInStorage(loadedAiConfig);
             }
-            if (localSt.length > 0) {
-              await supabase.from('subtasks').insert(localSt);
-            }
-            migrated = true;
+          } catch (profileErr) {
+            console.warn("User profile loading failed:", profileErr);
           }
-        }
 
-        if (validHbData.length === 0) {
-          const hbLocalStr = localStorage.getItem('fg_habits');
-          const hblLocalStr = localStorage.getItem('fg_habit_logs');
-
-          const localHb = hbLocalStr ? JSON.parse(hbLocalStr) : [];
-          const localHbl = hblLocalStr ? JSON.parse(hblLocalStr) : [];
-
-          if (localHb.length > 0) {
-            console.log("Migrating local storage habits to the cloud for user id:", userId);
-            const habitsToUpload = localHb.map((h: any) => ({ ...h, user_id: userId }));
-            await supabase.from('habits').insert(habitsToUpload);
-
-            if (localHbl.length > 0) {
-              await supabase.from('habit_logs').insert(localHbl);
-            }
-            migrated = true;
-          }
-        }
-
-        if (migrated) {
-          // Re-fetch since we just migrated!
-          const { data: refetchedFg } = await supabase
+          // Fetch from Supabase cloud (user-filtered)
+          const { data: fgData, error: fgErr } = await supabase
             .from('final_goals')
             .select('*')
             .eq('user_id', userId)
             .order('created_at', { ascending: false });
 
-          const { data: refetchedHb } = await supabase
+          const { data: hbData, error: hbErr } = await supabase
             .from('habits')
             .select('*')
             .eq('user_id', userId)
             .order('created_at', { ascending: false });
 
-          validFgData = refetchedFg || [];
-          validHbData = refetchedHb || [];
-        }
+          if (fgErr || hbErr) {
+            throw new Error('Supabase fetch error');
+          }
 
-        // Fetch Milestones
-        let msData: Milestone[] = [];
-        const goalIds = validFgData.map(g => g.id);
-        if (goalIds.length > 0) {
-          const { data, error } = await supabase
-            .from('milestones')
-            .select('*')
-            .in('final_goal_id', goalIds)
-            .order('order_index', { ascending: true });
-          if (error) throw error;
-          msData = data || [];
-        }
+          let validFgData = fgData || [];
+          let validHbData = hbData || [];
 
-        // Fetch Subtasks
-        let stData: Subtask[] = [];
-        const msIds = msData.map(m => m.id);
-        if (msIds.length > 0) {
-          const { data, error } = await supabase
-            .from('subtasks')
-            .select('*')
-            .in('milestone_id', msIds)
-            .order('order_index', { ascending: true });
-          if (error) throw error;
-          stData = data || [];
-        }
+          // Migrate goals and habits independently to the cloud
+          let migrated = false;
 
-        // Fetch Habit Logs
-        let hblData: HabitLog[] = [];
-        const hbIds = validHbData.map(h => h.id);
-        if (hbIds.length > 0) {
-          const { data, error } = await supabase
-            .from('habit_logs')
-            .select('*')
-            .in('habit_id', hbIds);
-          if (error) throw error;
-          hblData = data || [];
-        }
+          const safeGetItem = (key: string) => {
+            try {
+              return localStorage.getItem(key);
+            } catch (e) {
+              console.warn("localStorage not accessible for migration:", key, e);
+              return null;
+            }
+          };
 
-        setFinalGoals(validFgData);
-        setMilestones(msData);
-        setSubtasks(stData);
-        setHabits(validHbData);
-        setHabitLogs(hblData);
-      } catch (err) {
-        console.error('Supabase failed, falling back to LocalStorage', err);
+          const safeParse = (str: string | null) => {
+            if (!str) return [];
+            try {
+              return JSON.parse(str);
+            } catch (e) {
+              console.error("Failed to parse local JSON during migration:", e);
+              return [];
+            }
+          };
+
+          if (validFgData.length === 0) {
+            const fgLocalStr = safeGetItem('fg_goals');
+            const msLocalStr = safeGetItem('fg_milestones');
+            const stLocalStr = safeGetItem('fg_subtasks');
+
+            const localFg = safeParse(fgLocalStr);
+            const localMs = safeParse(msLocalStr);
+            const localSt = safeParse(stLocalStr);
+
+            if (localFg.length > 0) {
+              console.log("Migrating local storage goals to the cloud for user id:", userId);
+              const goalsToUpload = localFg.map((g: any) => ({ ...g, user_id: userId }));
+              await supabase.from('final_goals').insert(goalsToUpload);
+
+              if (localMs.length > 0) {
+                await supabase.from('milestones').insert(localMs);
+              }
+              if (localSt.length > 0) {
+                await supabase.from('subtasks').insert(localSt);
+              }
+              migrated = true;
+            }
+          }
+
+          if (validHbData.length === 0) {
+            const hbLocalStr = safeGetItem('fg_habits');
+            const hblLocalStr = safeGetItem('fg_habit_logs');
+
+            const localHb = safeParse(hbLocalStr);
+            const localHbl = safeParse(hblLocalStr);
+
+            if (localHb.length > 0) {
+              console.log("Migrating local storage habits to the cloud for user id:", userId);
+              const habitsToUpload = localHb.map((h: any) => ({ ...h, user_id: userId }));
+              await supabase.from('habits').insert(habitsToUpload);
+
+              if (localHbl.length > 0) {
+                await supabase.from('habit_logs').insert(localHbl);
+              }
+              migrated = true;
+            }
+          }
+
+          if (migrated) {
+            // Re-fetch since we just migrated!
+            const { data: refetchedFg } = await supabase
+              .from('final_goals')
+              .select('*')
+              .eq('user_id', userId)
+              .order('created_at', { ascending: false });
+
+            const { data: refetchedHb } = await supabase
+              .from('habits')
+              .select('*')
+              .eq('user_id', userId)
+              .order('created_at', { ascending: false });
+
+            validFgData = refetchedFg || [];
+            validHbData = refetchedHb || [];
+          }
+
+          // Fetch Milestones
+          let msData: Milestone[] = [];
+          const goalIds = validFgData.map(g => g.id);
+          if (goalIds.length > 0) {
+            const { data, error } = await supabase
+              .from('milestones')
+              .select('*')
+              .in('final_goal_id', goalIds)
+              .order('order_index', { ascending: true });
+            if (error) throw error;
+            msData = data || [];
+          }
+
+          // Fetch Subtasks
+          let stData: Subtask[] = [];
+          const msIds = msData.map(m => m.id);
+          if (msIds.length > 0) {
+            const { data, error } = await supabase
+              .from('subtasks')
+              .select('*')
+              .in('milestone_id', msIds)
+              .order('order_index', { ascending: true });
+            if (error) throw error;
+            stData = data || [];
+          }
+
+          // Fetch Habit Logs
+          let hblData: HabitLog[] = [];
+          const hbIds = validHbData.map(h => h.id);
+          if (hbIds.length > 0) {
+            const { data, error } = await supabase
+              .from('habit_logs')
+              .select('*')
+              .in('habit_id', hbIds);
+            if (error) throw error;
+            hblData = data || [];
+          }
+
+          setFinalGoals(validFgData);
+          setMilestones(msData);
+          setSubtasks(stData);
+          setHabits(validHbData);
+          setHabitLogs(hblData);
+        } catch (err) {
+          console.error('Supabase failed, falling back to LocalStorage', err);
+          loadFromLocalStorage();
+        }
+      } else {
         loadFromLocalStorage();
       }
-    } else {
+    } catch (globalErr) {
+      console.error('Global error in loadAllData:', globalErr);
       loadFromLocalStorage();
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // Auth Operations
@@ -341,29 +366,65 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const loadFromLocalStorage = () => {
-    const fg = localStorage.getItem('fg_goals');
-    const ms = localStorage.getItem('fg_milestones');
-    const st = localStorage.getItem('fg_subtasks');
-    const hb = localStorage.getItem('fg_habits');
-    const hbl = localStorage.getItem('fg_habit_logs');
+    try {
+      const safeGet = (key: string) => {
+        try {
+          return localStorage.getItem(key);
+        } catch (e) {
+          console.warn("localStorage read failed for:", key, e);
+          return null;
+        }
+      };
 
-    setFinalGoals(fg ? JSON.parse(fg) : []);
-    setMilestones(ms ? JSON.parse(ms) : []);
-    setSubtasks(st ? JSON.parse(st) : []);
-    setHabits(hb ? JSON.parse(hb) : []);
-    setHabitLogs(hbl ? JSON.parse(hbl) : []);
+      const safeParse = (str: string | null) => {
+        if (!str) return [];
+        try {
+          return JSON.parse(str);
+        } catch (e) {
+          console.error("Failed to parse JSON from localStorage:", e);
+          return [];
+        }
+      };
+
+      const fg = safeGet('fg_goals');
+      const ms = safeGet('fg_milestones');
+      const st = safeGet('fg_subtasks');
+      const hb = safeGet('fg_habits');
+      const hbl = safeGet('fg_habit_logs');
+
+      setFinalGoals(safeParse(fg));
+      setMilestones(safeParse(ms));
+      setSubtasks(safeParse(st));
+      setHabits(safeParse(hb));
+      setHabitLogs(safeParse(hbl));
+    } catch (err) {
+      console.error("Critical fallback failure in loadFromLocalStorage:", err);
+      setFinalGoals([]);
+      setMilestones([]);
+      setSubtasks([]);
+      setHabits([]);
+      setHabitLogs([]);
+    }
   };
 
   // Sync to LocalStorage (helper for LS mode)
   const syncToLocalStorage = (fg: FinalGoal[], ms: Milestone[], st: Subtask[]) => {
-    localStorage.setItem('fg_goals', JSON.stringify(fg));
-    localStorage.setItem('fg_milestones', JSON.stringify(ms));
-    localStorage.setItem('fg_subtasks', JSON.stringify(st));
+    try {
+      localStorage.setItem('fg_goals', JSON.stringify(fg));
+      localStorage.setItem('fg_milestones', JSON.stringify(ms));
+      localStorage.setItem('fg_subtasks', JSON.stringify(st));
+    } catch (e) {
+      console.warn("localStorage sync failed:", e);
+    }
   };
 
   const syncHabitsToLocalStorage = (hbList: Habit[], hblList: HabitLog[]) => {
-    localStorage.setItem('fg_habits', JSON.stringify(hbList));
-    localStorage.setItem('fg_habit_logs', JSON.stringify(hblList));
+    try {
+      localStorage.setItem('fg_habits', JSON.stringify(hbList));
+      localStorage.setItem('fg_habit_logs', JSON.stringify(hblList));
+    } catch (e) {
+      console.warn("localStorage habits sync failed:", e);
+    }
   };
 
   // Helper dynamic calculations
@@ -719,8 +780,12 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // --- CONFIG & DEMO DATA ---
   const saveSupabaseConfig = async (url: string, key: string): Promise<boolean> => {
     if (!url || !key) {
-      localStorage.removeItem('supabase_url');
-      localStorage.removeItem('supabase_anon_key');
+      try {
+        localStorage.removeItem('supabase_url');
+        localStorage.removeItem('supabase_anon_key');
+      } catch (e) {
+        console.warn("localStorage not accessible to clear config:", e);
+      }
       setSupabaseConfig({ url: '', anonKey: '' });
       setIsSupabaseConnected(false);
       loadFromLocalStorage();
@@ -728,8 +793,12 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
-      localStorage.setItem('supabase_url', url);
-      localStorage.setItem('supabase_anon_key', key);
+      try {
+        localStorage.setItem('supabase_url', url);
+        localStorage.setItem('supabase_anon_key', key);
+      } catch (e) {
+        console.warn("localStorage not accessible to set config:", e);
+      }
       const client = initSupabaseClient(url, key);
       
       if (client) {

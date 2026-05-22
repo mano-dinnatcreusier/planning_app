@@ -1,16 +1,27 @@
 import type { AiConfig } from '../types';
 
 export const getAiConfig = (): AiConfig => {
-  const url = localStorage.getItem('fg_ai_url') || 'https://api.deepseek.com/v1';
-  const apiKey = localStorage.getItem('fg_ai_key') || '';
-  const model = localStorage.getItem('fg_ai_model') || 'deepseek-chat';
+  let url = 'https://api.deepseek.com/v1';
+  let apiKey = '';
+  let model = 'deepseek-chat';
+  try {
+    url = localStorage.getItem('fg_ai_url') || 'https://api.deepseek.com/v1';
+    apiKey = localStorage.getItem('fg_ai_key') || '';
+    model = localStorage.getItem('fg_ai_model') || 'deepseek-chat';
+  } catch (e) {
+    console.warn('localStorage is not accessible for AI config:', e);
+  }
   return { url, apiKey, model };
 };
 
 export const saveAiConfigInStorage = (config: AiConfig) => {
-  localStorage.setItem('fg_ai_url', config.url);
-  localStorage.setItem('fg_ai_key', config.apiKey);
-  localStorage.setItem('fg_ai_model', config.model);
+  try {
+    localStorage.setItem('fg_ai_url', config.url);
+    localStorage.setItem('fg_ai_key', config.apiKey);
+    localStorage.setItem('fg_ai_model', config.model);
+  } catch (e) {
+    console.warn('localStorage is not accessible to save AI config:', e);
+  }
 };
 
 interface AiEvaluationResult {
