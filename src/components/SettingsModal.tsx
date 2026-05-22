@@ -18,7 +18,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     clearDatabase,
     loadDemoData,
     user,
-    logout
+    logout,
+    finalGoals,
+    habits
   } = useGoals();
 
   const [url, setUrl] = useState(supabaseConfig.url);
@@ -317,6 +319,9 @@ CREATE TABLE IF NOT EXISTS user_profiles (
                       {user.email ? user.email.split('@')[0] : 'Utilisateur'}
                     </h4>
                     <span style={{ fontSize: '0.7rem', color: 'var(--text-low)' }}>Compte Cloud Actif</span>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--accent-primary)', marginTop: '4px', fontWeight: 600 }}>
+                      📊 {finalGoals.length} objectifs, {habits.length} habitudes chargés
+                    </span>
                   </div>
                 </div>
                 <button
