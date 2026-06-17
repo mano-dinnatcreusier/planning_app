@@ -80,3 +80,45 @@ export interface HabitLog {
   status: 'done' | 'missed';
 }
 
+export interface Tracker {
+  id: string;
+  name: string;
+  periodicity: 'daily' | 'hebdo' | 'month' | 'custom';
+  unit: string;
+  created_at: string;
+  user_id?: string;
+}
+
+export interface TrackerLog {
+  id: string;
+  tracker_id: string;
+  date: string; // YYYY-MM-DD
+  value: string; // The user can enter whatever value they want, not necessarily a number
+  created_at: string;
+}
+
+export interface StrongExercise {
+  id: string;
+  name: string;
+  created_at?: string;
+  user_id?: string;
+}
+
+export interface StrongWorkoutSet {
+  id?: string;
+  exercise_name: string;
+  weight: number;
+  reps: number;
+  set_order: number;
+}
+
+export interface StrongWorkout {
+  id: string;
+  date: string; // YYYY-MM-DD
+  name: string; // e.g. "Leg", "Chest and Triceps"
+  sets: StrongWorkoutSet[];
+  created_at?: string;
+  user_id?: string;
+}
+
+

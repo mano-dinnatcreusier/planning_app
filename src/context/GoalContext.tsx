@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { FinalGoal, Milestone, Subtask, AiConfig, Habit, HabitLog } from '../types';
+import type { FinalGoal, Milestone, Subtask, AiConfig, Habit, HabitLog, Tracker, TrackerLog, StrongExercise, StrongWorkoutSet, StrongWorkout } from '../types';
 import { getSupabase, initSupabaseClient, getSupabaseConfig } from '../utils/supabaseClient';
 import { getAiConfig, saveAiConfigInStorage } from '../utils/aiClient';
 import type { User } from '@supabase/supabase-js';
@@ -10,6 +10,8 @@ interface GoalContextType {
   subtasks: Subtask[];
   habits: Habit[];
   habitLogs: HabitLog[];
+  trackers: Tracker[];
+  trackerLogs: TrackerLog[];
   loading: boolean;
   isSupabaseConnected: boolean;
   supabaseConfig: { url: string; anonKey: string };
@@ -37,6 +39,19 @@ interface GoalContextType {
   addHabit: (habitData: Omit<Habit, 'id' | 'created_at'>) => Promise<string>;
   deleteHabit: (id: string) => Promise<void>;
   toggleHabitLog: (habitId: string, date: string, currentStatus: 'done' | 'missed' | null) => Promise<void>;
+  // Trackers CRUD
+  addTracker: (name: string, periodicity: 'daily' | 'hebdo' | 'month' | 'custom', unit: string) => Promise<string>;
+  deleteTracker: (id: string) => Promise<void>;
+  addTrackerLog: (trackerId: string, date: string, value: string) => Promise<void>;
+  deleteTrackerLog: (id: string) => Promise<void>;
+  // Strong CRUD
+  strongExercises: StrongExercise[];
+  strongWorkouts: StrongWorkout[];
+  addStrongExercise: (name: string) => Promise<string>;
+  deleteStrongExercise: (id: string) => Promise<void>;
+  addStrongWorkout: (workout: Omit<StrongWorkout, 'id'>) => Promise<string>;
+  deleteStrongWorkout: (id: string) => Promise<void>;
+  importStrongCSVData: (csvContent: string) => Promise<{ workoutsCount: number; exercisesCount: number }>;
   // Config & Demo Data
   saveSupabaseConfig: (url: string, key: string) => Promise<boolean>;
   saveAiConfig: (url: string, apiKey: string, model: string) => Promise<void>;
@@ -53,6 +68,10 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [habits, setHabits] = useState<Habit[]>([]);
   const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
+  const [trackers, setTrackers] = useState<Tracker[]>([]);
+  const [trackerLogs, setTrackerLogs] = useState<TrackerLog[]>([]);
+  const [strongExercises, setStrongExercises] = useState<StrongExercise[]>([]);
+  const [strongWorkouts, setStrongWorkouts] = useState<StrongWorkout[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isSupabaseConnected, setIsSupabaseConnected] = useState<boolean>(false);
   const [supabaseConfig, setSupabaseConfig] = useState(getSupabaseConfig());
@@ -286,6 +305,88 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
             hblData = data || [];
           }
 
+          // Fetch Trackers and Tracker Logs
+          let trData: Tracker[] = [];
+          let trlData: TrackerLog[] = [];
+          try {
+            const { data: trackersData, error: trackersErr } = await supabase
+              .from('trackers')
+              .select('*')
+              .eq('user_id', userId)
+              .order('created_at', { ascending: false });
+            
+            if (trackersErr) throw trackersErr;
+            trData = trackersData || [];
+
+            if (trData.length > 0) {
+              const trIds = trData.map(t => t.id);
+              const { data: logsData, error: logsErr } = await supabase
+                .from('tracker_logs')
+                .select('*')
+                .in('tracker_id', trIds)
+                .order('date', { ascending: false });
+              
+              if (logsErr) throw logsErr;
+              trlData = logsData || [];
+            }
+            setTrackers(trData);
+            setTrackerLogs(trlData);
+          } catch (trackerDbErr) {
+            console.warn("Could not load trackers from Supabase (tables might not exist). Falling back to LocalStorage.", trackerDbErr);
+            loadTrackersFromLocalStorage();
+          }
+
+          // Fetch Strong Exercises and Workouts
+          let strongExData: StrongExercise[] = [];
+          let strongWoData: StrongWorkout[] = [];
+          try {
+            const { data: exData, error: exErr } = await supabase
+              .from('strong_exercises')
+              .select('*')
+              .eq('user_id', userId)
+              .order('name', { ascending: true });
+            if (exErr) throw exErr;
+            strongExData = exData || [];
+            setStrongExercises(strongExData);
+
+            const { data: woData, error: woErr } = await supabase
+              .from('strong_workouts')
+              .select('*')
+              .eq('user_id', userId)
+              .order('date', { ascending: false });
+            if (woErr) throw woErr;
+            const rawWorkouts = woData || [];
+
+            if (rawWorkouts.length > 0) {
+              const woIds = rawWorkouts.map(w => w.id);
+              const { data: setsData, error: setsErr } = await supabase
+                .from('strong_workout_sets')
+                .select('*')
+                .in('workout_id', woIds)
+                .order('set_order', { ascending: true });
+              if (setsErr) throw setsErr;
+              const allSets = setsData || [];
+              
+              strongWoData = rawWorkouts.map(w => ({
+                id: w.id,
+                date: w.date,
+                name: w.name,
+                user_id: w.user_id,
+                created_at: w.created_at,
+                sets: allSets.filter(s => s.workout_id === w.id).map(s => ({
+                  exercise_name: s.exercise_name,
+                  weight: Number(s.weight),
+                  reps: Number(s.reps),
+                  set_order: s.set_order
+                }))
+              }));
+            }
+            setStrongWorkouts(strongWoData);
+          } catch (strongDbErr) {
+            console.warn("Could not load strong data from Supabase. Falling back to LocalStorage.", strongDbErr);
+            loadStrongFromLocalStorage();
+          }
+
           setFinalGoals(validFgData);
           setMilestones(msData);
           setSubtasks(stData);
@@ -363,6 +464,10 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSubtasks([]);
     setHabits([]);
     setHabitLogs([]);
+    setTrackers([]);
+    setTrackerLogs([]);
+    setStrongExercises([]);
+    setStrongWorkouts([]);
   };
 
   const loadFromLocalStorage = () => {
@@ -397,6 +502,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSubtasks(safeParse(st));
       setHabits(safeParse(hb));
       setHabitLogs(safeParse(hbl));
+      loadTrackersFromLocalStorage();
+      loadStrongFromLocalStorage();
     } catch (err) {
       console.error("Critical fallback failure in loadFromLocalStorage:", err);
       setFinalGoals([]);
@@ -404,6 +511,64 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSubtasks([]);
       setHabits([]);
       setHabitLogs([]);
+      loadTrackersFromLocalStorage();
+      loadStrongFromLocalStorage();
+    }
+  };
+
+  const loadTrackersFromLocalStorage = () => {
+    try {
+      const safeGet = (key: string) => {
+        try { return localStorage.getItem(key); } catch (e) { return null; }
+      };
+      const safeParse = (str: string | null) => {
+        if (!str) return [];
+        try { return JSON.parse(str); } catch (e) { return []; }
+      };
+      const tr = safeGet('fg_trackers');
+      const trl = safeGet('fg_tracker_logs');
+      setTrackers(safeParse(tr));
+      setTrackerLogs(safeParse(trl));
+    } catch (err) {
+      console.error("Failed to load trackers from LocalStorage:", err);
+      setTrackers([]);
+      setTrackerLogs([]);
+    }
+  };
+
+  const syncTrackersToLocalStorage = (trList: Tracker[], trlList: TrackerLog[]) => {
+    try {
+      localStorage.setItem('fg_trackers', JSON.stringify(trList));
+      localStorage.setItem('fg_tracker_logs', JSON.stringify(trlList));
+    } catch (e) {
+      console.warn("localStorage trackers sync failed:", e);
+    }
+  };
+
+  const loadStrongFromLocalStorage = () => {
+    try {
+      const safeGet = (key: string) => {
+        try { return localStorage.getItem(key); } catch (e) { return null; }
+      };
+      const safeParse = (str: string | null) => {
+        if (!str) return [];
+        try { return JSON.parse(str); } catch (e) { return []; }
+      };
+      setStrongExercises(safeParse(safeGet('fg_strong_exercises')));
+      setStrongWorkouts(safeParse(safeGet('fg_strong_workouts')));
+    } catch (err) {
+      console.error("Failed to load strong data from LocalStorage:", err);
+      setStrongExercises([]);
+      setStrongWorkouts([]);
+    }
+  };
+
+  const syncStrongToLocalStorage = (exList: StrongExercise[], woList: StrongWorkout[]) => {
+    try {
+      localStorage.setItem('fg_strong_exercises', JSON.stringify(exList));
+      localStorage.setItem('fg_strong_workouts', JSON.stringify(woList));
+    } catch (e) {
+      console.warn("localStorage strong sync failed:", e);
     }
   };
 
@@ -834,9 +999,17 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (supabase) {
       try {
         await supabase.from('final_goals').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        try {
+          await supabase.from('trackers').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        } catch (trErr) {
+          console.warn("Could not clear trackers from Supabase:", trErr);
+        }
         setFinalGoals([]);
         setMilestones([]);
         setSubtasks([]);
+        setTrackers([]);
+        setTrackerLogs([]);
+        syncTrackersToLocalStorage([], []);
       } catch (err) {
         console.error('Supabase clear failed', err);
       }
@@ -844,7 +1017,10 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setFinalGoals([]);
       setMilestones([]);
       setSubtasks([]);
+      setTrackers([]);
+      setTrackerLogs([]);
       syncToLocalStorage([], [], []);
+      syncTrackersToLocalStorage([], []);
     }
     setLoading(false);
   };
@@ -1101,6 +1277,400 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // --- TRACKERS CRUD ---
+  const addTracker = async (name: string, periodicity: 'daily' | 'hebdo' | 'month' | 'custom', unit: string) => {
+    const newTracker: Tracker = {
+      id: crypto.randomUUID(),
+      name,
+      periodicity,
+      unit,
+      created_at: new Date().toISOString(),
+      user_id: user?.id
+    };
+    
+    const supabase = getSupabase();
+    if (supabase && user) {
+      try {
+        const { error } = await supabase.from('trackers').insert(newTracker);
+        if (error) throw error;
+      } catch (err) {
+        console.warn("Failed to save tracker in Supabase (tables might not exist). Saving locally.", err);
+      }
+    }
+    
+    const nextTrackers = [newTracker, ...trackers];
+    setTrackers(nextTrackers);
+    syncTrackersToLocalStorage(nextTrackers, trackerLogs);
+    
+    return newTracker.id;
+  };
+
+  const deleteTracker = async (id: string) => {
+    const supabase = getSupabase();
+    if (supabase && user) {
+      try {
+        await supabase.from('trackers').delete().eq('id', id);
+      } catch (err) {
+        console.warn("Failed to delete tracker from Supabase.", err);
+      }
+    }
+    
+    const nextTrackers = trackers.filter(t => t.id !== id);
+    const nextLogs = trackerLogs.filter(l => l.tracker_id !== id);
+    setTrackers(nextTrackers);
+    setTrackerLogs(nextLogs);
+    syncTrackersToLocalStorage(nextTrackers, nextLogs);
+  };
+
+  const addTrackerLog = async (trackerId: string, date: string, value: string) => {
+    const existingIndex = trackerLogs.findIndex(l => l.tracker_id === trackerId && l.date === date);
+    
+    const newLog: TrackerLog = {
+      id: existingIndex !== -1 ? trackerLogs[existingIndex].id : crypto.randomUUID(),
+      tracker_id: trackerId,
+      date,
+      value,
+      created_at: new Date().toISOString()
+    };
+    
+    const supabase = getSupabase();
+    if (supabase && user) {
+      try {
+        const { error } = await supabase.from('tracker_logs').upsert(newLog);
+        if (error) throw error;
+      } catch (err) {
+        console.warn("Failed to upsert tracker log to Supabase.", err);
+      }
+    }
+    
+    let nextLogs = [...trackerLogs];
+    if (existingIndex !== -1) {
+      nextLogs[existingIndex] = newLog;
+    } else {
+      nextLogs = [newLog, ...nextLogs];
+    }
+    setTrackerLogs(nextLogs);
+    syncTrackersToLocalStorage(trackers, nextLogs);
+  };
+
+  const deleteTrackerLog = async (logId: string) => {
+    const supabase = getSupabase();
+    if (supabase && user) {
+      try {
+        await supabase.from('tracker_logs').delete().eq('id', logId);
+      } catch (err) {
+        console.warn("Failed to delete tracker log from Supabase.", err);
+      }
+    }
+    
+    const nextLogs = trackerLogs.filter(l => l.id !== logId);
+    setTrackerLogs(nextLogs);
+    syncTrackersToLocalStorage(trackers, nextLogs);
+  };
+
+  // --- STRONG CRUD ---
+  const addStrongExercise = async (name: string) => {
+    const cleanName = name.trim();
+    if (!cleanName) return '';
+    
+    const exists = strongExercises.some(e => e.name.toLowerCase() === cleanName.toLowerCase());
+    if (exists) {
+      const existing = strongExercises.find(e => e.name.toLowerCase() === cleanName.toLowerCase());
+      return existing?.id || '';
+    }
+
+    const newEx: StrongExercise = {
+      id: crypto.randomUUID(),
+      name: cleanName,
+      created_at: new Date().toISOString(),
+      user_id: user?.id
+    };
+
+    const supabase = getSupabase();
+    if (supabase && user) {
+      try {
+        const { error } = await supabase.from('strong_exercises').insert(newEx);
+        if (error) throw error;
+      } catch (err) {
+        console.warn("Failed to insert exercise in Supabase.", err);
+      }
+    }
+
+    const nextExercises = [...strongExercises, newEx];
+    setStrongExercises(nextExercises);
+    syncStrongToLocalStorage(nextExercises, strongWorkouts);
+    return newEx.id;
+  };
+
+  const deleteStrongExercise = async (id: string) => {
+    const supabase = getSupabase();
+    if (supabase && user) {
+      try {
+        await supabase.from('strong_exercises').delete().eq('id', id);
+      } catch (err) {
+        console.warn("Failed to delete exercise from Supabase.", err);
+      }
+    }
+
+    const nextExercises = strongExercises.filter(e => e.id !== id);
+    setStrongExercises(nextExercises);
+    syncStrongToLocalStorage(nextExercises, strongWorkouts);
+  };
+
+  const addStrongWorkout = async (workout: Omit<StrongWorkout, 'id'>) => {
+    const newWorkout: StrongWorkout = {
+      id: crypto.randomUUID(),
+      date: workout.date || new Date().toISOString().split('T')[0],
+      name: workout.name || "Entraînement de musculation",
+      sets: workout.sets.map((s, idx) => ({ ...s, set_order: s.set_order ?? (idx + 1) })),
+      created_at: new Date().toISOString(),
+      user_id: user?.id
+    };
+
+    const supabase = getSupabase();
+    if (supabase && user) {
+      try {
+        const { error: woErr } = await supabase.from('strong_workouts').insert({
+          id: newWorkout.id,
+          date: newWorkout.date,
+          name: newWorkout.name,
+          user_id: user.id,
+          created_at: newWorkout.created_at
+        });
+        if (woErr) throw woErr;
+
+        const setsToInsert = newWorkout.sets.map(s => ({
+          workout_id: newWorkout.id,
+          exercise_name: s.exercise_name,
+          set_order: s.set_order,
+          weight: s.weight,
+          reps: s.reps,
+          created_at: newWorkout.created_at
+        }));
+
+        const { error: setsErr } = await supabase.from('strong_workout_sets').insert(setsToInsert);
+        if (setsErr) throw setsErr;
+      } catch (err) {
+        console.warn("Failed to insert workout in Supabase. Falling back to local state.", err);
+      }
+    }
+
+    const nextWorkouts = [newWorkout, ...strongWorkouts];
+    setStrongWorkouts(nextWorkouts);
+    syncStrongToLocalStorage(strongExercises, nextWorkouts);
+    return newWorkout.id;
+  };
+
+  const deleteStrongWorkout = async (id: string) => {
+    const supabase = getSupabase();
+    if (supabase && user) {
+      try {
+        await supabase.from('strong_workouts').delete().eq('id', id);
+      } catch (err) {
+        console.warn("Failed to delete workout from Supabase.", err);
+      }
+    }
+
+    const nextWorkouts = strongWorkouts.filter(w => w.id !== id);
+    setStrongWorkouts(nextWorkouts);
+    syncStrongToLocalStorage(strongExercises, nextWorkouts);
+  };
+
+  const importStrongCSVData = async (csvContent: string) => {
+    const lines = csvContent.split(/\r?\n/);
+    if (lines.length <= 1) return { workoutsCount: 0, exercisesCount: 0 };
+
+    const parseCSVLine = (line: string) => {
+      const result: string[] = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ';' && !inQuotes) {
+          result.push(current);
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      result.push(current);
+      return result;
+    };
+
+    const headers = parseCSVLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, ''));
+    const workoutIdx = headers.indexOf("Workout #");
+    const dateIdx = headers.indexOf("Date");
+    const nameIdx = headers.indexOf("Workout Name");
+    const exerciseIdx = headers.indexOf("Exercise Name");
+    const setOrderIdx = headers.indexOf("Set Order");
+    const weightIdx = headers.indexOf("Weight (kg)");
+    const repsIdx = headers.indexOf("Reps");
+
+    if (dateIdx === -1 || exerciseIdx === -1 || weightIdx === -1 || repsIdx === -1) {
+      throw new Error("Format CSV invalide. Colonnes manquantes.");
+    }
+
+    const workoutsMap = new Map<string, { date: string; name: string; sets: StrongWorkoutSet[] }>();
+    const uniqueExerciseNames = new Set<string>();
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim()) continue;
+      const cols = parseCSVLine(line).map(c => c.trim().replace(/^"|"$/g, ''));
+      if (cols.length <= Math.max(dateIdx, exerciseIdx, weightIdx, repsIdx)) continue;
+
+      const workoutNum = workoutIdx !== -1 ? cols[workoutIdx] : '';
+      const dateVal = cols[dateIdx];
+      const workoutName = nameIdx !== -1 ? cols[nameIdx] || "Workout" : "Workout";
+      const exerciseName = cols[exerciseIdx];
+      const setOrder = setOrderIdx !== -1 ? cols[setOrderIdx] : '1';
+      const weightVal = parseFloat(cols[weightIdx]) || 0;
+      const repsVal = parseInt(cols[repsIdx], 10) || 0;
+
+      if (setOrder === 'Note' || !exerciseName) {
+        continue;
+      }
+
+      const key = `${dateVal}_${workoutName}_${workoutNum}`;
+      uniqueExerciseNames.add(exerciseName);
+
+      const dateOnly = dateVal.split(' ')[0] || new Date().toISOString().split('T')[0];
+
+      if (!workoutsMap.has(key)) {
+        workoutsMap.set(key, {
+          date: dateOnly,
+          name: workoutName,
+          sets: []
+        });
+      }
+
+      const workoutObj = workoutsMap.get(key)!;
+      workoutObj.sets.push({
+        exercise_name: exerciseName,
+        weight: weightVal,
+        reps: repsVal,
+        set_order: workoutObj.sets.length + 1
+      });
+    }
+
+    const saveLocally = () => {
+      const newExercises = [...strongExercises];
+      uniqueExerciseNames.forEach(name => {
+        if (!newExercises.some(e => e.name.toLowerCase() === name.toLowerCase())) {
+          newExercises.push({
+            id: crypto.randomUUID(),
+            name,
+            created_at: new Date().toISOString()
+          });
+        }
+      });
+
+      const newWorkouts: StrongWorkout[] = Array.from(workoutsMap.values()).map(w => ({
+        id: crypto.randomUUID(),
+        date: w.date,
+        name: w.name,
+        sets: w.sets,
+        created_at: new Date().toISOString()
+      }));
+
+      const finalAllWorkouts = [...newWorkouts, ...strongWorkouts].sort((a, b) => b.date.localeCompare(a.date));
+      setStrongExercises(newExercises);
+      setStrongWorkouts(finalAllWorkouts);
+      syncStrongToLocalStorage(newExercises, finalAllWorkouts);
+    };
+
+    const supabase = getSupabase();
+    if (supabase && user) {
+      try {
+        const exerciseList = Array.from(uniqueExerciseNames).map(name => ({
+          id: crypto.randomUUID(),
+          name,
+          user_id: user.id,
+          created_at: new Date().toISOString()
+        }));
+        
+        for (let i = 0; i < exerciseList.length; i += 100) {
+          const chunk = exerciseList.slice(i, i + 100);
+          await supabase.from('strong_exercises').upsert(chunk, { onConflict: 'user_id,name' });
+        }
+
+        const workoutsList = Array.from(workoutsMap.values()).map(w => ({
+          id: crypto.randomUUID(),
+          date: w.date,
+          name: w.name,
+          user_id: user.id,
+          created_at: new Date().toISOString(),
+          temp_sets: w.sets
+        }));
+
+        const workoutsToInsert = workoutsList.map(w => ({
+          id: w.id,
+          date: w.date,
+          name: w.name,
+          user_id: user.id,
+          created_at: w.created_at
+        }));
+
+        for (let i = 0; i < workoutsToInsert.length; i += 100) {
+          const chunk = workoutsToInsert.slice(i, i + 100);
+          const { error } = await supabase.from('strong_workouts').insert(chunk);
+          if (error) throw error;
+        }
+
+        const setsToInsert: any[] = [];
+        workoutsList.forEach(w => {
+          w.temp_sets.forEach(s => {
+            setsToInsert.push({
+              workout_id: w.id,
+              exercise_name: s.exercise_name,
+              set_order: s.set_order,
+              weight: s.weight,
+              reps: s.reps,
+              created_at: w.created_at
+            });
+          });
+        });
+
+        for (let i = 0; i < setsToInsert.length; i += 500) {
+          const chunk = setsToInsert.slice(i, i + 500);
+          const { error } = await supabase.from('strong_workout_sets').insert(chunk);
+          if (error) throw error;
+        }
+
+        const finalWorkouts: StrongWorkout[] = workoutsList.map(w => ({
+          id: w.id,
+          date: w.date,
+          name: w.name,
+          user_id: w.user_id,
+          created_at: w.created_at,
+          sets: w.temp_sets
+        }));
+
+        const updatedExercises = [...strongExercises];
+        exerciseList.forEach(newEx => {
+          if (!updatedExercises.some(e => e.name.toLowerCase() === newEx.name.toLowerCase())) {
+            updatedExercises.push(newEx);
+          }
+        });
+
+        const finalAllWorkouts = [...finalWorkouts, ...strongWorkouts].sort((a, b) => b.date.localeCompare(a.date));
+        setStrongExercises(updatedExercises);
+        setStrongWorkouts(finalAllWorkouts);
+        syncStrongToLocalStorage(updatedExercises, finalAllWorkouts);
+
+      } catch (supabaseErr) {
+        console.error("Bulk insert to Supabase failed, falling back to LocalStorage:", supabaseErr);
+        saveLocally();
+      }
+    } else {
+      saveLocally();
+    }
+
+    return { workoutsCount: workoutsMap.size, exercisesCount: uniqueExerciseNames.size };
+  };
+
   return (
     <GoalContext.Provider
       value={{
@@ -1109,6 +1679,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         subtasks,
         habits,
         habitLogs,
+        trackers,
+        trackerLogs,
         loading: loading || !authInitialized,
         isSupabaseConnected,
         supabaseConfig,
@@ -1132,6 +1704,17 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         addHabit,
         deleteHabit,
         toggleHabitLog,
+        addTracker,
+        deleteTracker,
+        addTrackerLog,
+        deleteTrackerLog,
+        strongExercises,
+        strongWorkouts,
+        addStrongExercise,
+        deleteStrongExercise,
+        addStrongWorkout,
+        deleteStrongWorkout,
+        importStrongCSVData,
         saveSupabaseConfig,
         saveAiConfig,
         clearDatabase,

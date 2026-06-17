@@ -1,8 +1,8 @@
-import { LayoutDashboard, CalendarRange, Database, CalendarDays, Activity } from 'lucide-react';
+import { LayoutDashboard, CalendarRange, Database, CalendarDays, Activity, LineChart, Dumbbell } from 'lucide-react';
 
 interface MobileNavProps {
-  activeTab: 'dashboard' | 'timeline' | 'calendar' | 'habits';
-  setActiveTab: (tab: 'dashboard' | 'timeline' | 'calendar' | 'habits') => void;
+  activeTab: 'dashboard' | 'timeline' | 'calendar' | 'habits' | 'tracking' | 'strong';
+  setActiveTab: (tab: 'dashboard' | 'timeline' | 'calendar' | 'habits' | 'tracking' | 'strong') => void;
   openSettings: () => void;
 }
 
@@ -119,6 +119,52 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           filter: activeTab === 'habits' ? 'drop-shadow(0 0 4px var(--accent-primary-glow))' : 'none'
         }} />
         <span style={{ fontSize: '0.65rem', fontWeight: 600 }}>Habitudes</span>
+      </button>
+
+      <button
+        onClick={() => setActiveTab('tracking')}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '4px',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          color: activeTab === 'tracking' ? 'var(--accent-primary)' : 'var(--text-med)',
+          transition: 'var(--transition-fast)',
+          width: '60px',
+          height: '100%'
+        }}
+      >
+        <LineChart size={20} style={{
+          filter: activeTab === 'tracking' ? 'drop-shadow(0 0 4px var(--accent-primary-glow))' : 'none'
+        }} />
+        <span style={{ fontSize: '0.65rem', fontWeight: 600 }}>Tracking</span>
+      </button>
+
+      <button
+        onClick={() => setActiveTab('strong')}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '4px',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          color: activeTab === 'strong' ? 'var(--accent-primary)' : 'var(--text-med)',
+          transition: 'var(--transition-fast)',
+          width: '60px',
+          height: '100%'
+        }}
+      >
+        <Dumbbell size={20} style={{
+          filter: activeTab === 'strong' ? 'drop-shadow(0 0 4px var(--accent-primary-glow))' : 'none'
+        }} />
+        <span style={{ fontSize: '0.65rem', fontWeight: 600 }}>Strong</span>
       </button>
 
       <button

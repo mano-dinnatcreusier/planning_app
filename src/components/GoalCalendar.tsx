@@ -27,7 +27,13 @@ export const GoalCalendar: React.FC = () => {
   const [pulseDate, setPulseDate] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'goal' | 'milestone'>('all');
-  const [viewMode, setViewMode] = useState<'month' | 'day'>('month');
+  const [viewMode, setViewMode] = useState<'month' | 'day'>(() => {
+    try {
+      return window.innerWidth <= 1024 ? 'day' : 'month';
+    } catch (e) {
+      return 'month';
+    }
+  });
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
   // Day navigation handlers
@@ -200,6 +206,9 @@ export const GoalCalendar: React.FC = () => {
           .calendar-sidebar-panel {
             flex: 1 1 100% !important;
             max-height: none !important;
+          }
+          .day-habits-column {
+            order: -1 !important;
           }
         }
       `}</style>
@@ -753,7 +762,7 @@ export const GoalCalendar: React.FC = () => {
                 gap: '24px'
               }}>
                 {/* 1. Goals Column */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div className="day-goals-column" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <h3 style={{ fontSize: '0.95rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', color: '#ffffff', margin: 0 }}>
                     <Trophy size={16} style={{ color: 'var(--accent-primary)' }} />
                     Objectifs Cibles
@@ -820,7 +829,7 @@ export const GoalCalendar: React.FC = () => {
                 </div>
 
                 {/* 2. Milestones Column */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div className="day-milestones-column" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <h3 style={{ fontSize: '0.95rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', color: '#ffffff', margin: 0 }}>
                     <CalendarIcon size={16} style={{ color: 'var(--accent-secondary)' }} />
                     Jalons du Jour
@@ -889,7 +898,7 @@ export const GoalCalendar: React.FC = () => {
                 </div>
 
                 {/* 3. Habits Column */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div className="day-habits-column" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <h3 style={{ fontSize: '0.95rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', color: '#ffffff', margin: 0 }}>
                     <ListTodo size={16} style={{ color: 'var(--accent-success)' }} />
                     Habitudes Actives
