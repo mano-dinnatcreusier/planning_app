@@ -51,7 +51,7 @@ interface GoalContextType {
   deleteStrongExercise: (id: string) => Promise<void>;
   addStrongWorkout: (workout: Omit<StrongWorkout, 'id'>) => Promise<string>;
   deleteStrongWorkout: (id: string) => Promise<void>;
-  importStrongCSVData: (csvContent: string) => Promise<{ workoutsCount: number; exercisesCount: number }>;
+  importStrongCSVData: (csvContent: string) => Promise<{ workoutsCount: number; exercisesCount: number; savedToCloud: boolean }>;
   // Config & Demo Data
   saveSupabaseConfig: (url: string, key: string) => Promise<boolean>;
   saveAiConfig: (url: string, apiKey: string, model: string) => Promise<void>;
@@ -1478,7 +1478,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const importStrongCSVData = async (csvContent: string) => {
     const lines = csvContent.split(/\r?\n/);
-    if (lines.length <= 1) return { workoutsCount: 0, exercisesCount: 0 };
+    if (lines.length <= 1) return { workoutsCount: 0, exercisesCount: 0, savedToCloud: false };
 
     const parseCSVLine = (line: string) => {
       const result: string[] = [];
@@ -1659,16 +1659,17 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setStrongExercises(updatedExercises);
         setStrongWorkouts(finalAllWorkouts);
         syncStrongToLocalStorage(updatedExercises, finalAllWorkouts);
+        return { workoutsCount: workoutsMap.size, exercisesCount: uniqueExerciseNames.size, savedToCloud: true };
 
       } catch (supabaseErr) {
         console.error("Bulk insert to Supabase failed, falling back to LocalStorage:", supabaseErr);
         saveLocally();
+        return { workoutsCount: workoutsMap.size, exercisesCount: uniqueExerciseNames.size, savedToCloud: false };
       }
     } else {
       saveLocally();
+      return { workoutsCount: workoutsMap.size, exercisesCount: uniqueExerciseNames.size, savedToCloud: false };
     }
-
-    return { workoutsCount: workoutsMap.size, exercisesCount: uniqueExerciseNames.size };
   };
 
   return (

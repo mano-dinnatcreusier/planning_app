@@ -209,8 +209,12 @@ export const StrongView: React.FC = () => {
       const res = await fetch('./strong.csv');
       if (!res.ok) throw new Error("Le fichier public/strong.csv n'a pas pu être récupéré sur le serveur.");
       const csvText = await res.text();
-      const { workoutsCount, exercisesCount } = await importStrongCSVData(csvText);
-      setImportSuccess(`Importation terminée ! ${workoutsCount} séances et ${exercisesCount} exercices ont été ajoutés à la base de données.`);
+      const { workoutsCount, exercisesCount, savedToCloud } = await importStrongCSVData(csvText);
+      if (savedToCloud) {
+        setImportSuccess(`Importation Cloud réussie ! ${workoutsCount} séances et ${exercisesCount} exercices ont été enregistrés dans votre base Supabase.`);
+      } else {
+        setImportSuccess(`Importation locale réussie (Sauvegarde locale uniquement) ! ${workoutsCount} séances et ${exercisesCount} exercices enregistrés dans ce navigateur.`);
+      }
     } catch (err: any) {
       setImportError(err.message || "Erreur de chargement du fichier CSV.");
     } finally {
@@ -230,8 +234,12 @@ export const StrongView: React.FC = () => {
     reader.onload = async (event) => {
       try {
         const text = event.target?.result as string;
-        const { workoutsCount, exercisesCount } = await importStrongCSVData(text);
-        setImportSuccess(`Importation terminée ! ${workoutsCount} séances et ${exercisesCount} exercices ont été importés.`);
+        const { workoutsCount, exercisesCount, savedToCloud } = await importStrongCSVData(text);
+        if (savedToCloud) {
+          setImportSuccess(`Importation Cloud réussie ! ${workoutsCount} séances et ${exercisesCount} exercices enregistrés dans votre base Supabase.`);
+        } else {
+          setImportSuccess(`Importation locale réussie (Sauvegarde locale uniquement) ! ${workoutsCount} séances et ${exercisesCount} exercices enregistrés dans ce navigateur.`);
+        }
       } catch (err: any) {
         setImportError(err.message || "Erreur de lecture du fichier.");
       } finally {
