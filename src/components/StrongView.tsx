@@ -206,7 +206,7 @@ export const StrongView: React.FC = () => {
     setImportSuccess('');
     setImportError('');
     try {
-      const res = await fetch('/strong.csv');
+      const res = await fetch('./strong.csv');
       if (!res.ok) throw new Error("Le fichier public/strong.csv n'a pas pu être récupéré sur le serveur.");
       const csvText = await res.text();
       const { workoutsCount, exercisesCount } = await importStrongCSVData(csvText);
