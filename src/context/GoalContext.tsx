@@ -469,7 +469,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 user_id: userId,
                 created_at: e.created_at || new Date().toISOString()
               }));
-              await supabase.from('strong_exercises').insert(exToUpload);
+              await supabase.from('strong_exercises').upsert(exToUpload, { onConflict: 'user_id,name' });
               const { data: refreshedEx } = await supabase
                 .from('strong_exercises')
                 .select('*')
@@ -495,9 +495,10 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (missingWorkouts.length > 0) {
               console.log(`Synchronisation Cloud: migration de ${missingWorkouts.length} séances Strong locales...`);
               for (const mw of missingWorkouts) {
+                const cleanDate = (mw.date || new Date().toISOString().split('T')[0]).split(' ')[0];
                 await supabase.from('strong_workouts').insert({
                   id: mw.id,
-                  date: mw.date,
+                  date: cleanDate,
                   name: mw.name,
                   user_id: userId,
                   created_at: mw.created_at || new Date().toISOString()
