@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import type { FinalGoal, Milestone, Subtask, AiConfig, Habit, HabitLog, Tracker, TrackerLog, StrongExercise, StrongWorkoutSet, StrongWorkout } from '../types';
 import { getSupabase, initSupabaseClient, getSupabaseConfig } from '../utils/supabaseClient';
 import { getAiConfig, saveAiConfigInStorage } from '../utils/aiClient';
@@ -77,6 +77,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isSupabaseConnected, setIsSupabaseConnected] = useState<boolean>(false);
   const [supabaseConfig, setSupabaseConfig] = useState(getSupabaseConfig());
   const [aiConfig, setAiConfig] = useState(getAiConfig());
+  const isPerformingLoadRef = useRef<boolean>(false);
 
   // Points helper calculations
   const calculateFinalGoalPoints = (goal: Partial<FinalGoal>) => {
@@ -134,14 +135,14 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [isSupabaseConnected, user, authInitialized]);
 
-  // Synchronisation continue Mobile / PC : réveil au focus/visibilité et Supabase Realtime
+  // Synchronisation continue Mobile / PC : réveil au focus/visibilité et Supabase Realtime avec anti-boucle
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase || !user) return;
 
     // 1. Re-synchroniser dès que l'utilisateur revient sur l'onglet ou déverrouille son téléphone
     const handleSyncOnVisible = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && !isPerformingLoadRef.current) {
         console.log("Application revenue au premier plan, synchronisation Cloud...");
         loadAllData();
       }
@@ -150,16 +151,24 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     document.addEventListener('visibilitychange', handleSyncOnVisible);
     window.addEventListener('focus', handleSyncOnVisible);
 
-    // 2. Écoute temps-réel via Supabase Realtime (si publication activée)
+    // 2. Écoute temps-réel via Supabase Realtime avec anti-rebond strict pour éviter les boucles d'appels infinies
+    let debounceTimer: any = null;
     const channel = supabase
       .channel('app-realtime-sync')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => {
-        console.log("Modification Cloud détectée en temps réel, mise à jour...");
-        loadAllData();
+        if (isPerformingLoadRef.current) return;
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          if (!isPerformingLoadRef.current) {
+            console.log("Modification Cloud détectée en temps réel, synchronisation...");
+            loadAllData();
+          }
+        }, 2000);
       })
       .subscribe();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       document.removeEventListener('visibilitychange', handleSyncOnVisible);
       window.removeEventListener('focus', handleSyncOnVisible);
       supabase.removeChannel(channel);
@@ -168,6 +177,11 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Read data
   const loadAllData = async () => {
+    if (isPerformingLoadRef.current) {
+      console.log("loadAllData déjà en cours d'exécution, appel ignoré");
+      return;
+    }
+    isPerformingLoadRef.current = true;
     setLoading(true);
     try {
       const supabase = getSupabase();
@@ -487,34 +501,45 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (woErr) throw woErr;
             const rawWorkouts = woData || [];
 
-            // Auto-migration des séances Strong locales
+            // Auto-migration des séances Strong locales en batch optimisé
             const localWorkouts = safeParse(safeGetItem('fg_strong_workouts'));
             const existingWoIds = new Set(rawWorkouts.map(w => w.id));
             const missingWorkouts = localWorkouts.filter((w: StrongWorkout) => !existingWoIds.has(w.id));
 
             if (missingWorkouts.length > 0) {
               console.log(`Synchronisation Cloud: migration de ${missingWorkouts.length} séances Strong locales...`);
-              for (const mw of missingWorkouts) {
-                const cleanDate = (mw.date || new Date().toISOString().split('T')[0]).split(' ')[0];
-                await supabase.from('strong_workouts').insert({
-                  id: mw.id,
-                  date: cleanDate,
-                  name: mw.name,
-                  user_id: userId,
-                  created_at: mw.created_at || new Date().toISOString()
-                });
-                if (mw.sets && mw.sets.length > 0) {
-                  const setsToInsert = mw.sets.map((s: any, idx: number) => ({
-                    workout_id: mw.id,
-                    exercise_name: s.exercise_name,
-                    set_order: s.set_order ?? (idx + 1),
-                    weight: Number(s.weight) || 0,
-                    reps: Number(s.reps) || 0,
-                    created_at: mw.created_at || new Date().toISOString()
-                  }));
-                  await supabase.from('strong_workout_sets').insert(setsToInsert);
-                }
+              const workoutsToInsert = missingWorkouts.map((mw: StrongWorkout) => ({
+                id: mw.id,
+                date: (mw.date || new Date().toISOString().split('T')[0]).split(' ')[0],
+                name: mw.name,
+                user_id: userId,
+                created_at: mw.created_at || new Date().toISOString()
+              }));
+
+              for (let i = 0; i < workoutsToInsert.length; i += 50) {
+                await supabase.from('strong_workouts').insert(workoutsToInsert.slice(i, i + 50));
               }
+
+              const allSetsToInsert: any[] = [];
+              missingWorkouts.forEach((mw: StrongWorkout) => {
+                if (mw.sets && mw.sets.length > 0) {
+                  mw.sets.forEach((s: any, idx: number) => {
+                    allSetsToInsert.push({
+                      workout_id: mw.id,
+                      exercise_name: s.exercise_name,
+                      set_order: s.set_order ?? (idx + 1),
+                      weight: Number(s.weight) || 0,
+                      reps: Number(s.reps) || 0,
+                      created_at: mw.created_at || new Date().toISOString()
+                    });
+                  });
+                }
+              });
+
+              for (let i = 0; i < allSetsToInsert.length; i += 200) {
+                await supabase.from('strong_workout_sets').insert(allSetsToInsert.slice(i, i + 200));
+              }
+
               const { data: refWorkouts } = await supabase
                 .from('strong_workouts')
                 .select('*')
@@ -584,6 +609,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       loadFromLocalStorage();
     } finally {
       setLoading(false);
+      isPerformingLoadRef.current = false;
     }
   };
 
