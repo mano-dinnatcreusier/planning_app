@@ -2,9 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { GoalProvider, useGoals } from './context/GoalContext';
 import { Sidebar } from './components/Sidebar';
 import { MobileNav } from './components/MobileNav';
-import { Dashboard } from './components/Dashboard';
-import { GoalTimeline } from './components/GoalTimeline';
-import { GoalCalendar } from './components/GoalCalendar';
+import type { MainTabType } from './components/MobileNav';
+import { GoalsHubView } from './components/GoalsHubView';
 import { HabitsView } from './components/HabitsView';
 import { TrackingView } from './components/TrackingView';
 import { StrongView } from './components/StrongView';
@@ -16,7 +15,8 @@ import type { FinalGoal, Milestone } from './types';
 // Core component wrapped in provider
 const MainApp: React.FC = () => {
   const { user, loading } = useGoals();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'timeline' | 'calendar' | 'habits' | 'tracking' | 'strong'>('dashboard');
+  const [activeTab, setActiveTab] = useState<MainTabType>('daily');
+  const [goalsSubTab, setGoalsSubTab] = useState<'dashboard' | 'timeline' | 'calendar'>('dashboard');
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   
   // Modals visibility states
@@ -83,6 +83,8 @@ const MainApp: React.FC = () => {
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        goalsSubTab={goalsSubTab}
+        setGoalsSubTab={setGoalsSubTab}
         selectedGoalId={selectedGoalId}
         setSelectedGoalId={setSelectedGoalId}
         openSettings={() => setIsSettingsOpen(true)}
@@ -96,36 +98,24 @@ const MainApp: React.FC = () => {
         openSettings={() => setIsSettingsOpen(true)}
       />
 
-      {/* 3. Main Dashboard / Timelines Content views */}
+      {/* 3. Main Views Content (The 4 Pillars) */}
       <main className="main-content">
-        {activeTab === 'dashboard' ? (
-          <Dashboard
-            setActiveTab={setActiveTab}
-            setSelectedGoalId={setSelectedGoalId}
-            openCreateModal={(type, parentId) => {
-              if (type === 'goal') openCreateGoalModal();
-              else openCreateMilestoneModal(parentId);
-            }}
-            openEditModal={openEditGoalModal}
-          />
-        ) : activeTab === 'timeline' ? (
-          <GoalTimeline
-            selectedGoalId={selectedGoalId}
-            setSelectedGoalId={setSelectedGoalId}
-            openCreateModal={(type, parentId) => {
-              if (type === 'goal') openCreateGoalModal();
-              else openCreateMilestoneModal(parentId);
-            }}
-            openEditMilestoneModal={openEditMilestoneModal}
-          />
-        ) : activeTab === 'calendar' ? (
-          <GoalCalendar />
-        ) : activeTab === 'habits' ? (
+        {activeTab === 'daily' ? (
           <HabitsView />
         ) : activeTab === 'tracking' ? (
           <TrackingView />
-        ) : (
+        ) : activeTab === 'strong' ? (
           <StrongView />
+        ) : (
+          <GoalsHubView
+            initialSubTab={goalsSubTab}
+            selectedGoalId={selectedGoalId}
+            setSelectedGoalId={setSelectedGoalId}
+            openCreateGoalModal={openCreateGoalModal}
+            openCreateMilestoneModal={openCreateMilestoneModal}
+            openEditGoalModal={openEditGoalModal}
+            openEditMilestoneModal={openEditMilestoneModal}
+          />
         )}
       </main>
 

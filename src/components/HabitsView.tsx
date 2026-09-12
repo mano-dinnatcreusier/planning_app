@@ -3,7 +3,6 @@ import { useGoals } from '../context/GoalContext';
 import { suggestHabitViaAi } from '../utils/aiClient';
 import type { HabitSuggestionResult } from '../utils/aiClient';
 import { 
-  Activity, 
   Sparkles, 
   Trash2, 
   Calendar, 
@@ -11,7 +10,10 @@ import {
   Check, 
   X, 
   Plus, 
-  Clock
+  Clock,
+  Sun,
+  Flame,
+  CalendarDays
 } from 'lucide-react';
 
 export const HabitsView: React.FC = () => {
@@ -21,8 +23,12 @@ export const HabitsView: React.FC = () => {
     habitLogs, 
     addHabit, 
     deleteHabit, 
+    setHabitLog,
     aiConfig 
   } = useGoals();
+
+  // Top Sub-Tab switcher: 'today' (fast check-in) | 'manage' (routines & AI)
+  const [activeSubTab, setActiveSubTab] = useState<'today' | 'manage'>('today');
 
   // Tab controls inside creation panel
   const [creationMode, setCreationMode] = useState<'manual' | 'ai'>('manual');
@@ -159,6 +165,67 @@ export const HabitsView: React.FC = () => {
     return { doneCount, missedCount, compliance };
   };
 
+  // Streak calculation (consecutive days done)
+  const getHabitStreak = (habitId: string) => {
+    const logs = habitLogs.filter(l => l.habit_id === habitId);
+    if (logs.length === 0) return 0;
+    
+    const dateStatusMap = new Map<string, 'done' | 'missed'>();
+    logs.forEach(l => dateStatusMap.set(l.date, l.status));
+    
+    let streak = 0;
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    
+    let checkDate = new Date(now);
+    const todayStatus = dateStatusMap.get(today);
+    if (todayStatus === 'done') {
+      streak++;
+      checkDate.setDate(checkDate.getDate() - 1);
+    } else if (todayStatus === 'missed') {
+      return 0;
+    } else {
+      checkDate.setDate(checkDate.getDate() - 1);
+    }
+    
+    for (let i = 0; i < 365; i++) {
+      const dStr = checkDate.toISOString().split('T')[0];
+      const status = dateStatusMap.get(dStr);
+      if (status === 'done') {
+        streak++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+    return streak;
+  };
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const formattedToday = new Intl.DateTimeFormat('fr-FR', { 
+    weekday: 'long', 
+    day: 'numeric', 
+    month: 'long' 
+  }).format(new Date());
+
+  const todayDoneCount = habits.filter(h => {
+    const l = habitLogs.find(log => log.habit_id === h.id && log.date === todayStr);
+    return l?.status === 'done';
+  }).length;
+  const todayTotalCount = habits.length;
+  const todayPct = todayTotalCount > 0 ? Math.round((todayDoneCount / todayTotalCount) * 100) : 0;
+
+  const handleToggleTodayStatus = async (habitId: string, targetStatus: 'done' | 'missed') => {
+    const currentLog = habitLogs.find(l => l.habit_id === habitId && l.date === todayStr);
+    const currentStatus = currentLog ? currentLog.status : null;
+    
+    if (currentStatus === targetStatus) {
+      await setHabitLog(habitId, todayStr, null);
+    } else {
+      await setHabitLog(habitId, todayStr, targetStatus);
+    }
+  };
+
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       
@@ -186,21 +253,359 @@ export const HabitsView: React.FC = () => {
             border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
             padding-top: 14px !important;
           }
+          .today-habit-item {
+            flex-direction: column !important;
+            align-items: stretch !important;
+            gap: 14px !important;
+          }
+          .today-actions-group {
+            width: 100% !important;
+          }
+          .today-actions-group button {
+            flex: 1 1 50% !important;
+          }
         }
       `}</style>
 
       {/* Habits Header Title */}
       <div>
         <h1 style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.03em', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <Activity style={{ color: 'var(--accent-primary)' }} />
-          Suivi des Habitudes
+          <Sun style={{ color: '#f59e0b' }} />
+          Quotidien & Routines
         </h1>
         <p style={{ color: 'var(--text-med)', fontSize: '0.95rem' }}>
-          Créez des routines récurrentes et améliorez votre taux de réussite RPG au quotidien.
+          Validez vos habitudes du jour en 1 clic et développez votre discipline au fil des jours.
         </p>
       </div>
 
-      {/* Grid Layout */}
+      {/* Top Segmented Control (Action vs Gestion) */}
+      <div 
+        className="glass"
+        style={{
+          display: 'inline-flex',
+          alignSelf: 'flex-start',
+          borderRadius: '50px',
+          padding: '4px',
+          gap: '4px',
+          border: '1px solid var(--border-color)',
+          maxWidth: '100%',
+          overflowX: 'auto'
+        }}
+      >
+        <button
+          onClick={() => setActiveSubTab('today')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 18px',
+            borderRadius: '50px',
+            border: 'none',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'var(--transition-fast)',
+            backgroundColor: activeSubTab === 'today' ? '#f59e0b' : 'transparent',
+            color: activeSubTab === 'today' ? '#000000' : 'var(--text-med)',
+            boxShadow: activeSubTab === 'today' ? '0 0 15px rgba(245, 158, 11, 0.4)' : 'none',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <Sun size={16} />
+          <span>Aujourd'hui (Action rapide)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('manage')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 18px',
+            borderRadius: '50px',
+            border: 'none',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'var(--transition-fast)',
+            backgroundColor: activeSubTab === 'manage' ? 'var(--accent-primary)' : 'transparent',
+            color: activeSubTab === 'manage' ? '#ffffff' : 'var(--text-med)',
+            boxShadow: activeSubTab === 'manage' ? 'var(--shadow-neon-primary)' : 'none',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <CalendarDays size={16} />
+          <span>Mes Routines & Assistant IA</span>
+        </button>
+      </div>
+
+      {/* VIEW 1: TODAY FAST CHECK-IN */}
+      {activeSubTab === 'today' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Today's Progress Banner */}
+          <div 
+            className="glass" 
+            style={{ 
+              borderRadius: 'var(--border-radius-lg)', 
+              padding: '24px', 
+              border: '1px solid rgba(245, 158, 11, 0.25)',
+              background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.05) 0%, rgba(168, 85, 247, 0.03) 100%)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <span style={{ fontSize: '0.8rem', textTransform: 'capitalize', color: 'var(--text-med)', fontWeight: 600, display: 'block' }}>
+                  {formattedToday}
+                </span>
+                <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#ffffff', margin: '2px 0 0 0' }}>
+                  {todayDoneCount} / {todayTotalCount} routine{todayTotalCount > 1 ? 's' : ''} validée{todayDoneCount > 1 ? 's' : ''}
+                </h2>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ 
+                  fontSize: '1.2rem', 
+                  fontWeight: 900, 
+                  color: todayPct === 100 ? 'var(--accent-success)' : '#f59e0b'
+                }}>
+                  {todayPct}%
+                </span>
+                {todayPct === 100 && (
+                  <span style={{ 
+                    fontSize: '0.75rem', 
+                    fontWeight: 700, 
+                    backgroundColor: 'rgba(16, 185, 129, 0.15)', 
+                    color: 'var(--accent-success)', 
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    padding: '3px 8px',
+                    borderRadius: '20px'
+                  }}>
+                    🎉 Journée Parfaite !
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Progress Track */}
+            <div style={{ width: '100%', height: '8px', backgroundColor: 'rgba(255, 255, 255, 0.06)', borderRadius: '4px', overflow: 'hidden' }}>
+              <div 
+                style={{ 
+                  width: `${todayPct}%`, 
+                  height: '100%', 
+                  backgroundColor: todayPct === 100 ? 'var(--accent-success)' : '#f59e0b',
+                  borderRadius: '4px',
+                  transition: 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                  boxShadow: todayPct === 100 ? '0 0 10px rgba(16, 185, 129, 0.5)' : '0 0 10px rgba(245, 158, 11, 0.4)'
+                }} 
+              />
+            </div>
+          </div>
+
+          {/* Today's Habits List */}
+          {habits.length === 0 ? (
+            <div className="glass" style={{ borderRadius: 'var(--border-radius-lg)', padding: '48px 24px', textAlign: 'center', color: 'var(--text-low)' }}>
+              <Sun size={48} style={{ color: '#f59e0b', marginBottom: '16px', opacity: 0.5 }} />
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', marginBottom: '6px' }}>
+                Aucune routine active pour le moment
+              </h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-med)', maxWidth: '420px', margin: '0 auto 20px auto' }}>
+                Configurez vos habitudes quotidiennes ou laissez l'IA générer des suggestions adaptées à vos objectifs.
+              </p>
+              <button
+                onClick={() => setActiveSubTab('manage')}
+                style={{
+                  backgroundColor: 'var(--accent-primary)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: 'var(--border-radius-sm)',
+                  padding: '10px 20px',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: 'var(--shadow-neon-primary)',
+                  transition: 'var(--transition-fast)'
+                }}
+              >
+                ➕ Créer une routine
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {habits.map(h => {
+                const todayLog = habitLogs.find(l => l.habit_id === h.id && l.date === todayStr);
+                const currentStatus = todayLog ? todayLog.status : null;
+                const streak = getHabitStreak(h.id);
+
+                return (
+                  <div
+                    key={h.id}
+                    className="today-habit-item glass"
+                    style={{
+                      borderRadius: 'var(--border-radius-lg)',
+                      padding: '18px 20px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '16px',
+                      border: currentStatus === 'done' 
+                        ? '1px solid rgba(16, 185, 129, 0.35)' 
+                        : currentStatus === 'missed'
+                          ? '1px solid rgba(244, 63, 94, 0.35)'
+                          : '1px solid var(--border-color)',
+                      backgroundColor: currentStatus === 'done'
+                        ? 'rgba(16, 185, 129, 0.04)'
+                        : currentStatus === 'missed'
+                          ? 'rgba(244, 63, 94, 0.03)'
+                          : 'var(--bg-card)',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    {/* Info */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        <span style={{ 
+                          fontSize: '1.05rem', 
+                          fontWeight: 700, 
+                          color: currentStatus === 'done' ? '#ffffff' : 'var(--text-high)',
+                          textDecoration: currentStatus === 'done' ? 'none' : 'none'
+                        }}>
+                          {h.title}
+                        </span>
+
+                        {streak > 0 && (
+                          <span 
+                            style={{ 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: '4px',
+                              fontSize: '0.72rem',
+                              fontWeight: 800,
+                              color: '#f59e0b',
+                              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                              border: '1px solid rgba(245, 158, 11, 0.25)',
+                              padding: '2px 7px',
+                              borderRadius: '12px'
+                            }}
+                            title={`${streak} jours consécutifs validés !`}
+                          >
+                            <Flame size={12} style={{ color: '#f59e0b' }} />
+                            {streak} j
+                          </span>
+                        )}
+                      </div>
+
+                      {h.description && (
+                        <p style={{ fontSize: '0.82rem', color: 'var(--text-med)', margin: 0 }}>
+                          {h.description}
+                        </p>
+                      )}
+
+                      {/* Connected Goal */}
+                      {h.goal_ids && h.goal_ids.length > 0 && (
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '2px' }}>
+                          {h.goal_ids.map(gid => {
+                            const goal = finalGoals.find(g => g.id === gid);
+                            if (!goal) return null;
+                            return (
+                              <span
+                                key={gid}
+                                style={{
+                                  fontSize: '0.65rem',
+                                  color: 'var(--accent-primary)',
+                                  backgroundColor: 'rgba(168, 85, 247, 0.06)',
+                                  border: '1px solid rgba(168, 85, 247, 0.2)',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px'
+                                }}
+                              >
+                                🎯 {goal.title}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Quick 1-tap Actions Group */}
+                    <div 
+                      className="today-actions-group"
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '8px', 
+                        flexShrink: 0 
+                      }}
+                    >
+                      {/* Done Button */}
+                      <button
+                        onClick={() => handleToggleTodayStatus(h.id, 'done')}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                          padding: '10px 18px',
+                          borderRadius: 'var(--border-radius-sm)',
+                          border: currentStatus === 'done' 
+                            ? '1px solid var(--accent-success)' 
+                            : '1px solid rgba(16, 185, 129, 0.25)',
+                          backgroundColor: currentStatus === 'done'
+                            ? 'var(--accent-success)'
+                            : 'rgba(16, 185, 129, 0.06)',
+                          color: currentStatus === 'done' ? '#ffffff' : 'var(--accent-success)',
+                          fontSize: '0.85rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          boxShadow: currentStatus === 'done' ? '0 0 14px rgba(16, 185, 129, 0.4)' : 'none'
+                        }}
+                      >
+                        <Check size={16} strokeWidth={3} />
+                        <span>Fait</span>
+                      </button>
+
+                      {/* Missed Button */}
+                      <button
+                        onClick={() => handleToggleTodayStatus(h.id, 'missed')}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                          padding: '10px 14px',
+                          borderRadius: 'var(--border-radius-sm)',
+                          border: currentStatus === 'missed'
+                            ? '1px solid var(--accent-danger)'
+                            : '1px solid rgba(244, 63, 94, 0.2)',
+                          backgroundColor: currentStatus === 'missed'
+                            ? 'var(--accent-danger)'
+                            : 'rgba(244, 63, 94, 0.05)',
+                          color: currentStatus === 'missed' ? '#ffffff' : 'var(--accent-danger)',
+                          fontSize: '0.85rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          boxShadow: currentStatus === 'missed' ? '0 0 14px rgba(244, 63, 94, 0.4)' : 'none'
+                        }}
+                      >
+                        <X size={16} strokeWidth={3} />
+                        <span>Manqué</span>
+                      </button>
+                    </div>
+
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW 2: MANAGE ROUTINES & AI ASSISTANT */}
+      {activeSubTab === 'manage' && (
       <div className="habits-grid-layout" style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
         
         {/* LEFT PANEL: Active Habits List (Flex 60%) */}
@@ -921,6 +1326,7 @@ export const HabitsView: React.FC = () => {
         </div>
 
       </div>
+      )}
 
     </div>
   );

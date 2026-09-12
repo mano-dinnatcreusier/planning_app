@@ -11,7 +11,11 @@ import {
   Upload, 
   ChevronRight, 
   Sparkles,
-  Trophy
+  Trophy,
+  BarChart3,
+  TrendingUp,
+  Flame,
+  Activity
 } from 'lucide-react';
 import type { StrongWorkoutSet } from '../types';
 
@@ -27,8 +31,17 @@ export const StrongView: React.FC = () => {
     isSupabaseConnected
   } = useGoals();
 
-  // Active sub-tab: 'history' | 'add' | 'exercises'
+  // Top Section: 'workouts' (Séances & Exercices) | 'stats' (Statistiques & Progression)
+  const [mainSection, setMainSection] = useState<'workouts' | 'stats'>('workouts');
+
+  // Workouts sub-tab: 'history' | 'add' | 'exercises'
   const [activeSubTab, setActiveSubTab] = useState<'history' | 'add' | 'exercises'>('history');
+
+  // Stats tab states
+  const [statsMetric, setStatsMetric] = useState<'tonnage' | 'sets'>('tonnage');
+  const [selectedStatsEx, setSelectedStatsEx] = useState<string>('');
+  const [hoveredWeek, setHoveredWeek] = useState<{ label: string; tonnage: number; sets: number; workouts: number } | null>(null);
+  const [hoveredExPoint, setHoveredExPoint] = useState<{ date: string; maxWeight: number; best1RM: number } | null>(null);
 
   // History states
   const [searchQuery, setSearchQuery] = useState('');
@@ -71,6 +84,141 @@ export const StrongView: React.FC = () => {
       });
     });
     return prs;
+  }, [strongWorkouts]);
+
+  // Global aggregate stats
+  const globalStrongStats = useMemo(() => {
+    let totalSets = 0;
+    let totalTonnage = 0;
+    strongWorkouts.forEach(w => {
+      (w.sets || []).forEach(s => {
+        totalSets++;
+        totalTonnage += (Number(s.weight) || 0) * (Number(s.reps) || 0);
+      });
+    });
+    return {
+      totalWorkouts: strongWorkouts.length,
+      totalSets,
+      totalTonnage: Math.round(totalTonnage),
+      tonnageTonnes: (totalTonnage / 1000).toFixed(1)
+    };
+  }, [strongWorkouts]);
+
+  // Weekly volume data for the last 8 weeks
+  const weeklyVolumeData = useMemo(() => {
+    const weeksMap = new Map<string, { label: string; date: Date; sets: number; tonnage: number; workouts: number }>();
+    const now = new Date();
+    const currentDay = now.getDay();
+    const diffToMonday = (currentDay === 0 ? -6 : 1) - currentDay;
+    const thisMonday = new Date(now);
+    thisMonday.setDate(now.getDate() + diffToMonday);
+    thisMonday.setHours(0, 0, 0, 0);
+
+    const weekKeys: string[] = [];
+    for (let i = 7; i >= 0; i--) {
+      const wDate = new Date(thisMonday);
+      wDate.setDate(thisMonday.getDate() - (i * 7));
+      const key = wDate.toISOString().split('T')[0];
+      weekKeys.push(key);
+      const label = `${wDate.getDate()} ${wDate.toLocaleDateString('fr-FR', { month: 'short' })}`;
+      weeksMap.set(key, { label, date: wDate, sets: 0, tonnage: 0, workouts: 0 });
+    }
+
+    strongWorkouts.forEach(w => {
+      if (!w.date) return;
+      const wDate = new Date(w.date);
+      const wDay = wDate.getDay();
+      const diffM = (wDay === 0 ? -6 : 1) - wDay;
+      const monday = new Date(wDate);
+      monday.setDate(wDate.getDate() + diffM);
+      monday.setHours(0, 0, 0, 0);
+      const key = monday.toISOString().split('T')[0];
+
+      if (weeksMap.has(key)) {
+        const item = weeksMap.get(key)!;
+        item.workouts++;
+        (w.sets || []).forEach(s => {
+          item.sets++;
+          item.tonnage += (Number(s.weight) || 0) * (Number(s.reps) || 0);
+        });
+      }
+    });
+
+    return weekKeys.map(k => weeksMap.get(k)!);
+  }, [strongWorkouts]);
+
+  // Exercise options list
+  const exerciseOptions = useMemo(() => {
+    const names = new Set<string>();
+    strongWorkouts.forEach(w => {
+      (w.sets || []).forEach(s => {
+        if (s.exercise_name) names.add(s.exercise_name.trim());
+      });
+    });
+    strongExercises.forEach(e => {
+      if (e.name) names.add(e.name.trim());
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [strongWorkouts, strongExercises]);
+
+  // Exercise progression & estimated 1RM
+  const exerciseProgressionData = useMemo(() => {
+    const exName = (selectedStatsEx || exerciseOptions[0] || '').toLowerCase().trim();
+    if (!exName) return null;
+
+    const sessions: { date: string; maxWeight: number; best1RM: number; totalVolume: number; setsCount: number }[] = [];
+    const sortedWo = [...strongWorkouts].sort((a, b) => a.date.localeCompare(b.date));
+
+    sortedWo.forEach(w => {
+      const sets = (w.sets || []).filter(s => (s.exercise_name || '').toLowerCase().trim() === exName);
+      if (sets.length === 0) return;
+
+      let maxW = 0;
+      let best1RM = 0;
+      let vol = 0;
+
+      sets.forEach(s => {
+        const wVal = Number(s.weight) || 0;
+        const rVal = Number(s.reps) || 0;
+        if (wVal > maxW) maxW = wVal;
+        const est1RM = rVal > 1 ? Math.round(wVal * (1 + rVal / 30) * 10) / 10 : wVal;
+        if (est1RM > best1RM) best1RM = est1RM;
+        vol += wVal * rVal;
+      });
+
+      sessions.push({
+        date: w.date,
+        maxWeight: maxW,
+        best1RM,
+        totalVolume: Math.round(vol),
+        setsCount: sets.length
+      });
+    });
+
+    return {
+      exerciseName: selectedStatsEx || exerciseOptions[0],
+      sessions,
+      allTimeMax: sessions.length > 0 ? Math.max(...sessions.map(s => s.maxWeight)) : 0,
+      allTime1RM: sessions.length > 0 ? Math.max(...sessions.map(s => s.best1RM)) : 0
+    };
+  }, [strongWorkouts, selectedStatsEx, exerciseOptions]);
+
+  // Workout frequency heatmap (last 60 days)
+  const frequencyDays = useMemo(() => {
+    const workoutDates = new Set(strongWorkouts.map(w => w.date));
+    const days: { dateStr: string; hasWorkout: boolean; dayOfWeek: number }[] = [];
+    const now = new Date();
+    for (let i = 59; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      days.push({
+        dateStr,
+        hasWorkout: workoutDates.has(dateStr),
+        dayOfWeek: d.getDay()
+      });
+    }
+    return days;
   }, [strongWorkouts]);
 
   // Filter workouts based on search query
@@ -388,6 +536,16 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
           font-weight: 600;
         }
         
+        .strong-stats-kpis {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 12px;
+        }
+        @media (max-width: 640px) {
+          .strong-stats-kpis {
+            grid-template-columns: 1fr 1fr !important;
+          }
+        }
         @media (max-width: 1024px) {
           .strong-layout-grid {
             flex-direction: column !important;
@@ -410,8 +568,72 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
         </p>
       </div>
 
-      {/* Sub Tabs Selection */}
-      <div className="strong-subtabs">
+      {/* Top Main Section Switcher */}
+      <div 
+        className="glass"
+        style={{
+          display: 'inline-flex',
+          alignSelf: 'flex-start',
+          borderRadius: '50px',
+          padding: '4px',
+          gap: '4px',
+          border: '1px solid var(--border-color)',
+          maxWidth: '100%',
+          overflowX: 'auto'
+        }}
+      >
+        <button
+          onClick={() => setMainSection('workouts')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 18px',
+            borderRadius: '50px',
+            border: 'none',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'var(--transition-fast)',
+            backgroundColor: mainSection === 'workouts' ? 'var(--accent-primary)' : 'transparent',
+            color: mainSection === 'workouts' ? '#000000' : 'var(--text-med)',
+            boxShadow: mainSection === 'workouts' ? 'var(--shadow-neon-primary)' : 'none',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <Dumbbell size={16} />
+          <span>Séances & Exercices</span>
+        </button>
+
+        <button
+          onClick={() => setMainSection('stats')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 18px',
+            borderRadius: '50px',
+            border: 'none',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'var(--transition-fast)',
+            backgroundColor: mainSection === 'stats' ? 'var(--accent-primary)' : 'transparent',
+            color: mainSection === 'stats' ? '#000000' : 'var(--text-med)',
+            boxShadow: mainSection === 'stats' ? 'var(--shadow-neon-primary)' : 'none',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <BarChart3 size={16} />
+          <span>Statistiques & Progression</span>
+        </button>
+      </div>
+
+      {/* SECTION SÉANCES & EXERCICES */}
+      {mainSection === 'workouts' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Sub Tabs Selection */}
+          <div className="strong-subtabs">
         <button 
           onClick={() => setActiveSubTab('history')} 
           className={`strong-subtab-btn ${activeSubTab === 'history' ? 'active' : ''}`}
@@ -1245,6 +1467,567 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
         </div>
       )}
 
+      </div>
+      )}
+
+      {/* SECTION STATISTIQUES & PROGRESSION */}
+      {mainSection === 'stats' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          
+          {/* KPI Summary Cards */}
+          <div className="strong-stats-kpis">
+            <div className="glass" style={{ borderRadius: 'var(--border-radius-md)', padding: '18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-med)', textTransform: 'uppercase', fontWeight: 700 }}>
+                  Séances Totales
+                </span>
+                <Dumbbell size={16} style={{ color: 'var(--accent-primary)' }} />
+              </div>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#ffffff', marginTop: '6px' }}>
+                {globalStrongStats.totalWorkouts}
+              </div>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-low)' }}>
+                enregistrées au total
+              </span>
+            </div>
+
+            <div className="glass" style={{ borderRadius: 'var(--border-radius-md)', padding: '18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-med)', textTransform: 'uppercase', fontWeight: 700 }}>
+                  Séries Validées
+                </span>
+                <Activity size={16} style={{ color: 'var(--accent-primary)' }} />
+              </div>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#ffffff', marginTop: '6px' }}>
+                {globalStrongStats.totalSets}
+              </div>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-low)' }}>
+                séries de travail effectives
+              </span>
+            </div>
+
+            <div className="glass" style={{ borderRadius: 'var(--border-radius-md)', padding: '18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-med)', textTransform: 'uppercase', fontWeight: 700 }}>
+                  Tonnage Cumulé
+                </span>
+                <Flame size={16} style={{ color: '#f59e0b' }} />
+              </div>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#ffffff', marginTop: '6px' }}>
+                {globalStrongStats.tonnageTonnes} <span style={{ fontSize: '0.9rem', color: 'var(--accent-primary)' }}>Tonnes</span>
+              </div>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-low)' }}>
+                {globalStrongStats.totalTonnage.toLocaleString('fr-FR')} kg soulevés
+              </span>
+            </div>
+
+            <div className="glass" style={{ borderRadius: 'var(--border-radius-md)', padding: '18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-med)', textTransform: 'uppercase', fontWeight: 700 }}>
+                  Exercices Travaillés
+                </span>
+                <Trophy size={16} style={{ color: '#eab308' }} />
+              </div>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#ffffff', marginTop: '6px' }}>
+                {exerciseOptions.length}
+              </div>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-low)' }}>
+                exercices uniques au catalogue
+              </span>
+            </div>
+          </div>
+
+          {/* Section 1: Weekly Volume & Tonnage SVG Chart */}
+          <div className="glass" style={{ borderRadius: 'var(--border-radius-lg)', padding: '24px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <BarChart3 size={18} style={{ color: 'var(--accent-primary)' }} />
+                  Volume Hebdomadaire (8 Dernières Semaines)
+                </h3>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-med)', margin: '4px 0 0 0' }}>
+                  Suivez votre surcharge progressive et le volume cumulé par semaine.
+                </p>
+              </div>
+
+              {/* Metric Switcher: Tonnage vs Sets */}
+              <div style={{ display: 'inline-flex', backgroundColor: 'rgba(255, 255, 255, 0.04)', borderRadius: '50px', padding: '3px', border: '1px solid var(--border-color)' }}>
+                <button
+                  onClick={() => setStatsMetric('tonnage')}
+                  style={{
+                    padding: '4px 12px',
+                    borderRadius: '50px',
+                    border: 'none',
+                    fontSize: '0.75rem',
+                    fontWeight: statsMetric === 'tonnage' ? 700 : 500,
+                    cursor: 'pointer',
+                    backgroundColor: statsMetric === 'tonnage' ? 'var(--accent-primary)' : 'transparent',
+                    color: statsMetric === 'tonnage' ? '#000000' : 'var(--text-med)',
+                    transition: 'var(--transition-fast)'
+                  }}
+                >
+                  Tonnage (kg)
+                </button>
+                <button
+                  onClick={() => setStatsMetric('sets')}
+                  style={{
+                    padding: '4px 12px',
+                    borderRadius: '50px',
+                    border: 'none',
+                    fontSize: '0.75rem',
+                    fontWeight: statsMetric === 'sets' ? 700 : 500,
+                    cursor: 'pointer',
+                    backgroundColor: statsMetric === 'sets' ? 'var(--accent-primary)' : 'transparent',
+                    color: statsMetric === 'sets' ? '#000000' : 'var(--text-med)',
+                    transition: 'var(--transition-fast)'
+                  }}
+                >
+                  Nombre de Séries
+                </button>
+              </div>
+            </div>
+
+            {/* SVG Bar Chart */}
+            <div style={{ width: '100%', overflowX: 'auto', position: 'relative' }}>
+              {(() => {
+                const maxVal = Math.max(...weeklyVolumeData.map(w => statsMetric === 'tonnage' ? w.tonnage : w.sets), 1);
+                const svgW = 620;
+                const svgH = 200;
+                const padX = 35;
+                const padBottom = 35;
+                const padTop = 25;
+                const chartH = svgH - padBottom - padTop;
+                const n = weeklyVolumeData.length;
+                const colW = (svgW - 2 * padX) / n;
+                const barW = Math.min(colW * 0.55, 36);
+
+                return (
+                  <svg viewBox={`0 0 ${svgW} ${svgH}`} style={{ width: '100%', minWidth: '460px', height: 'auto', display: 'block' }}>
+                    {/* Horizontal grid lines */}
+                    {[0, 0.33, 0.66, 1].map((ratio, idx) => {
+                      const y = padTop + chartH * (1 - ratio);
+                      const gridVal = Math.round(maxVal * ratio);
+                      return (
+                        <g key={idx}>
+                          <line x1={padX} y1={y} x2={svgW - padX} y2={y} stroke="rgba(255, 255, 255, 0.06)" strokeDasharray="3 3" />
+                          <text x={padX - 6} y={y + 3} textAnchor="end" fill="var(--text-low)" fontSize="9">
+                            {statsMetric === 'tonnage' && gridVal >= 1000 ? `${(gridVal / 1000).toFixed(1)}k` : gridVal}
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* Bars */}
+                    {weeklyVolumeData.map((w, idx) => {
+                      const val = statsMetric === 'tonnage' ? w.tonnage : w.sets;
+                      const barH = maxVal > 0 ? (val / maxVal) * chartH : 0;
+                      const x = padX + idx * colW + (colW - barW) / 2;
+                      const y = padTop + chartH - barH;
+                      const isHovered = hoveredWeek?.label === w.label;
+
+                      return (
+                        <g 
+                          key={w.label}
+                          style={{ cursor: 'pointer' }}
+                          onMouseEnter={() => setHoveredWeek(w)}
+                          onMouseLeave={() => setHoveredWeek(null)}
+                        >
+                          {/* Background hover bar highlight */}
+                          <rect
+                            x={padX + idx * colW}
+                            y={padTop}
+                            width={colW}
+                            height={chartH}
+                            fill={isHovered ? 'rgba(255, 255, 255, 0.03)' : 'transparent'}
+                            rx="4"
+                          />
+
+                          {/* Data bar */}
+                          <rect
+                            x={x}
+                            y={val > 0 ? y : padTop + chartH - 2}
+                            width={barW}
+                            height={val > 0 ? barH : 2}
+                            fill={isHovered ? '#60a5fa' : 'var(--accent-primary)'}
+                            rx="4"
+                            style={{ transition: 'all 0.2s ease' }}
+                          />
+
+                          {/* Value label above bar if non-zero */}
+                          {val > 0 && (
+                            <text
+                              x={x + barW / 2}
+                              y={y - 6}
+                              textAnchor="middle"
+                              fill={isHovered ? '#ffffff' : 'var(--text-med)'}
+                              fontSize="10"
+                              fontWeight="700"
+                            >
+                              {statsMetric === 'tonnage' ? (val >= 1000 ? `${(val / 1000).toFixed(1)}k` : val) : val}
+                            </text>
+                          )}
+
+                          {/* Week label below bar */}
+                          <text
+                            x={x + barW / 2}
+                            y={svgH - 12}
+                            textAnchor="middle"
+                            fill={isHovered ? '#ffffff' : 'var(--text-low)'}
+                            fontSize="9"
+                            fontWeight={isHovered ? '700' : '500'}
+                          >
+                            {w.label}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                );
+              })()}
+            </div>
+
+            {/* Hovered Week Details banner */}
+            <div style={{
+              backgroundColor: 'rgba(255, 255, 255, 0.02)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--border-radius-sm)',
+              padding: '10px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: '0.82rem',
+              color: 'var(--text-med)'
+            }}>
+              {hoveredWeek ? (
+                <>
+                  <span style={{ color: '#ffffff', fontWeight: 600 }}>
+                    Semaine du {hoveredWeek.label} :
+                  </span>
+                  <span>🏋️ <strong>{hoveredWeek.workouts}</strong> séance{hoveredWeek.workouts > 1 ? 's' : ''}</span>
+                  <span>🔢 <strong>{hoveredWeek.sets}</strong> séries</span>
+                  <span>⚖️ <strong>{hoveredWeek.tonnage.toLocaleString('fr-FR')} kg</strong> soulevés</span>
+                </>
+              ) : (
+                <span style={{ color: 'var(--text-low)', fontSize: '0.78rem' }}>
+                  Survolez une barre pour inspecter le détail des séances, séries et charge de la semaine.
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Section 2: Frequency & Consistency Heatmap */}
+          <div className="glass" style={{ borderRadius: 'var(--border-radius-lg)', padding: '24px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Flame size={18} style={{ color: '#f59e0b' }} />
+                Régularité des Entraînements (60 Derniers Jours)
+              </h3>
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-med)' }}>
+                {frequencyDays.filter(d => d.hasWorkout).length} séances effectuées
+              </span>
+            </div>
+
+            {/* Heatmap Grid */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '8px 0' }}>
+              {frequencyDays.map(d => (
+                <div
+                  key={d.dateStr}
+                  title={`${d.dateStr} : ${d.hasWorkout ? 'Séance effectuée ✓' : 'Repos'}`}
+                  style={{
+                    width: '18px',
+                    height: '18px',
+                    borderRadius: '4px',
+                    backgroundColor: d.hasWorkout ? 'var(--accent-primary)' : 'rgba(255, 255, 255, 0.05)',
+                    border: d.hasWorkout ? '1px solid var(--accent-primary)' : '1px solid rgba(255, 255, 255, 0.08)',
+                    boxShadow: d.hasWorkout ? '0 0 6px rgba(129, 140, 248, 0.35)' : 'none',
+                    transition: 'transform 0.15s ease'
+                  }}
+                />
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '0.72rem', color: 'var(--text-low)', marginTop: '2px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ width: '12px', height: '12px', borderRadius: '3px', backgroundColor: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)' }} />
+                <span>Repos</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ width: '12px', height: '12px', borderRadius: '3px', backgroundColor: 'var(--accent-primary)' }} />
+                <span>Séance Strong</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Exercise Progression & 1RM Curve */}
+          <div className="glass" style={{ borderRadius: 'var(--border-radius-lg)', padding: '24px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '14px' }}>
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <TrendingUp size={18} style={{ color: '#eab308' }} />
+                  Progression par Exercice & Record 1RM
+                </h3>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-med)', margin: '4px 0 0 0' }}>
+                  Analysez l'évolution de vos charges maximales et de votre 1RM estimé (formule d'Epley) séance après séance.
+                </p>
+              </div>
+
+              {/* Exercise Selector */}
+              {exerciseOptions.length > 0 && (
+                <div style={{ minWidth: '220px' }}>
+                  <select
+                    value={selectedStatsEx || exerciseOptions[0] || ''}
+                    onChange={(e) => setSelectedStatsEx(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: 'var(--border-radius-sm)',
+                      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                      border: '1px solid var(--border-color)',
+                      color: '#ffffff',
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      outline: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {exerciseOptions.map(name => (
+                      <option key={name} value={name} style={{ backgroundColor: '#1a1d24', color: '#ffffff' }}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {exerciseProgressionData && exerciseProgressionData.sessions.length > 0 ? (
+              <>
+                {/* Exercise PR Highlights */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
+                  <div className="glass" style={{ borderRadius: 'var(--border-radius-sm)', padding: '14px' }}>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-med)', textTransform: 'uppercase', fontWeight: 700 }}>
+                      Record Absolu (Charge Max)
+                    </span>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#eab308', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Trophy size={18} />
+                      <span>{exerciseProgressionData.allTimeMax} kg</span>
+                    </div>
+                  </div>
+
+                  <div className="glass" style={{ borderRadius: 'var(--border-radius-sm)', padding: '14px' }}>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-med)', textTransform: 'uppercase', fontWeight: 700 }}>
+                      1RM Estimé Max
+                    </span>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#38bdf8', marginTop: '4px' }}>
+                      {exerciseProgressionData.allTime1RM} kg
+                    </div>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--text-low)' }}>
+                      Formule: Charge × (1 + Reps/30)
+                    </span>
+                  </div>
+
+                  <div className="glass" style={{ borderRadius: 'var(--border-radius-sm)', padding: '14px' }}>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-med)', textTransform: 'uppercase', fontWeight: 700 }}>
+                      Séances Enregistrées
+                    </span>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#ffffff', marginTop: '4px' }}>
+                      {exerciseProgressionData.sessions.length}
+                    </div>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--text-low)' }}>
+                      historique complet
+                    </span>
+                  </div>
+                </div>
+
+                {/* SVG Progression Line Chart */}
+                {(() => {
+                  const sessions = exerciseProgressionData.sessions;
+                  if (sessions.length < 2) {
+                    return (
+                      <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-med)', fontSize: '0.85rem' }}>
+                        Une seule séance répertoriée pour cet exercice ({sessions[0].maxWeight} kg le {sessions[0].date}). Loggez davantage de séances pour afficher la courbe de progression.
+                      </div>
+                    );
+                  }
+
+                  const svgW = 640;
+                  const svgH = 220;
+                  const padLeft = 40;
+                  const padRight = 30;
+                  const padTop = 30;
+                  const padBottom = 40;
+                  const plotW = svgW - padLeft - padRight;
+                  const plotH = svgH - padTop - padBottom;
+
+                  const weights = sessions.map(s => s.maxWeight);
+                  const minW = Math.max(0, Math.floor(Math.min(...weights) * 0.9));
+                  const maxW = Math.ceil(Math.max(...weights) * 1.05) || 10;
+                  const rangeW = maxW - minW || 1;
+
+                  const points = sessions.map((s, idx) => {
+                    const x = padLeft + (idx / (sessions.length - 1)) * plotW;
+                    const y = padTop + plotH - ((s.maxWeight - minW) / rangeW) * plotH;
+                    return { x, y, session: s };
+                  });
+
+                  const linePath = points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+                  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${padTop + plotH} L ${points[0].x.toFixed(1)} ${padTop + plotH} Z`;
+
+                  return (
+                    <div style={{ width: '100%', overflowX: 'auto', position: 'relative' }}>
+                      <svg viewBox={`0 0 ${svgW} ${svgH}`} style={{ width: '100%', minWidth: '480px', height: 'auto', display: 'block' }}>
+                        <defs>
+                          <linearGradient id="exProgGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#eab308" stopOpacity="0.3" />
+                            <stop offset="100%" stopColor="#eab308" stopOpacity="0.0" />
+                          </linearGradient>
+                        </defs>
+
+                        {/* Y Grid lines */}
+                        {[0, 0.5, 1].map((ratio, idx) => {
+                          const y = padTop + plotH * (1 - ratio);
+                          const val = Math.round(minW + rangeW * ratio);
+                          return (
+                            <g key={idx}>
+                              <line x1={padLeft} y1={y} x2={svgW - padRight} y2={y} stroke="rgba(255, 255, 255, 0.06)" strokeDasharray="3 3" />
+                              <text x={padLeft - 6} y={y + 3} textAnchor="end" fill="var(--text-low)" fontSize="9">
+                                {val}kg
+                              </text>
+                            </g>
+                          );
+                        })}
+
+                        {/* Area */}
+                        <path d={areaPath} fill="url(#exProgGrad)" />
+
+                        {/* Line */}
+                        <path d={linePath} fill="none" stroke="#eab308" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+
+                        {/* Points */}
+                        {points.map((p, idx) => {
+                          const isHovered = hoveredExPoint?.date === p.session.date;
+                          const isPR = p.session.maxWeight === exerciseProgressionData.allTimeMax;
+
+                          return (
+                            <g 
+                              key={idx}
+                              style={{ cursor: 'pointer' }}
+                              onMouseEnter={() => setHoveredExPoint(p.session)}
+                              onMouseLeave={() => setHoveredExPoint(null)}
+                            >
+                              <circle
+                                cx={p.x}
+                                cy={p.y}
+                                r={isHovered ? 6 : isPR ? 5 : 3.5}
+                                fill={isPR ? '#eab308' : '#ffffff'}
+                                stroke="#1a1d24"
+                                strokeWidth="2"
+                              />
+                            </g>
+                          );
+                        })}
+
+                        {/* X-axis date labels for first, middle and last */}
+                        {points.length > 0 && (
+                          <>
+                            <text x={points[0].x} y={svgH - 12} textAnchor="start" fill="var(--text-low)" fontSize="9">
+                              {points[0].session.date}
+                            </text>
+                            {points.length > 2 && (
+                              <text x={points[Math.floor(points.length / 2)].x} y={svgH - 12} textAnchor="middle" fill="var(--text-low)" fontSize="9">
+                                {points[Math.floor(points.length / 2)].session.date}
+                              </text>
+                            )}
+                            <text x={points[points.length - 1].x} y={svgH - 12} textAnchor="end" fill="var(--text-low)" fontSize="9">
+                              {points[points.length - 1].session.date}
+                            </text>
+                          </>
+                        )}
+                      </svg>
+
+                      {/* Tooltip display */}
+                      {hoveredExPoint && (
+                        <div style={{
+                          marginTop: '8px',
+                          backgroundColor: 'rgba(234, 179, 8, 0.08)',
+                          border: '1px solid rgba(234, 179, 8, 0.25)',
+                          borderRadius: 'var(--border-radius-sm)',
+                          padding: '8px 14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          fontSize: '0.82rem',
+                          color: '#ffffff'
+                        }}>
+                          <span>Séance du <strong>{hoveredExPoint.date}</strong></span>
+                          <span>Charge max : <strong style={{ color: '#eab308' }}>{hoveredExPoint.maxWeight} kg</strong></span>
+                          <span>1RM estimé : <strong style={{ color: '#38bdf8' }}>{hoveredExPoint.best1RM} kg</strong></span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Historical Sessions Table */}
+                <div style={{ marginTop: '8px' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-med)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>
+                    Détail des dernières séances ({selectedStatsEx || exerciseOptions[0]}) :
+                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {[...exerciseProgressionData.sessions].reverse().slice(0, 8).map(s => {
+                      const isPR = s.maxWeight === exerciseProgressionData.allTimeMax;
+                      return (
+                        <div
+                          key={s.date}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '8px 12px',
+                            backgroundColor: isPR ? 'rgba(234, 179, 8, 0.06)' : 'rgba(255, 255, 255, 0.02)',
+                            border: isPR ? '1px solid rgba(234, 179, 8, 0.2)' : '1px solid var(--border-color)',
+                            borderRadius: 'var(--border-radius-sm)',
+                            fontSize: '0.82rem'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Calendar size={13} style={{ color: 'var(--text-low)' }} />
+                            <span style={{ fontWeight: 600, color: '#ffffff' }}>{s.date}</span>
+                            {isPR && (
+                              <span className="pr-pill">
+                                <Trophy size={11} />
+                                Record
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                            <span>Max: <strong style={{ color: '#ffffff' }}>{s.maxWeight} kg</strong></span>
+                            <span>1RM: <strong style={{ color: '#38bdf8' }}>{s.best1RM} kg</strong></span>
+                            <span style={{ color: 'var(--text-low)' }}>{s.setsCount} série{s.setsCount > 1 ? 's' : ''} ({s.totalVolume} kg vol.)</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-med)' }}>
+                <Dumbbell size={36} style={{ color: 'var(--accent-primary)', opacity: 0.4, marginBottom: '12px' }} />
+                <p style={{ fontSize: '0.9rem', margin: 0 }}>
+                  Aucune séance trouvée pour cet exercice.
+                </p>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-low)', marginTop: '4px' }}>
+                  Sélectionnez un autre exercice ou enregistrez une séance pour visualiser votre courbe de progression.
+                </p>
+              </div>
+            )}
+          </div>
+
+        </div>
+      )}
+
     </div>
   );
 };
+

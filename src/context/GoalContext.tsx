@@ -39,6 +39,7 @@ interface GoalContextType {
   addHabit: (habitData: Omit<Habit, 'id' | 'created_at'>) => Promise<string>;
   deleteHabit: (id: string) => Promise<void>;
   toggleHabitLog: (habitId: string, date: string, currentStatus: 'done' | 'missed' | null) => Promise<void>;
+  setHabitLog: (habitId: string, date: string, status: 'done' | 'missed' | null) => Promise<void>;
   // Trackers CRUD
   addTracker: (name: string, periodicity: 'daily' | 'hebdo' | 'month' | 'custom', unit: string) => Promise<string>;
   deleteTracker: (id: string) => Promise<void>;
@@ -1539,6 +1540,36 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const setHabitLog = async (habitId: string, date: string, status: 'done' | 'missed' | null) => {
+    const supabase = getSupabase();
+    if (supabase) {
+      if (status === null) {
+        const { error } = await supabase.from('habit_logs').delete().eq('habit_id', habitId).eq('date', date);
+        if (error) throw error;
+        setHabitLogs(prev => prev.filter(l => !(l.habit_id === habitId && l.date === date)));
+      } else {
+        const newLog: HabitLog = { habit_id: habitId, date, status };
+        const { error } = await supabase.from('habit_logs').upsert(newLog);
+        if (error) throw error;
+        setHabitLogs(prev => {
+          const filtered = prev.filter(l => !(l.habit_id === habitId && l.date === date));
+          return [...filtered, newLog];
+        });
+      }
+    } else {
+      let nextLogs = [...habitLogs];
+      if (status === null) {
+        nextLogs = nextLogs.filter(l => !(l.habit_id === habitId && l.date === date));
+      } else {
+        const newLog: HabitLog = { habit_id: habitId, date, status };
+        const filtered = nextLogs.filter(l => !(l.habit_id === habitId && l.date === date));
+        nextLogs = [...filtered, newLog];
+      }
+      setHabitLogs(nextLogs);
+      syncHabitsToLocalStorage(habits, nextLogs);
+    }
+  };
+
   // --- TRACKERS CRUD ---
   const addTracker = async (name: string, periodicity: 'daily' | 'hebdo' | 'month' | 'custom', unit: string) => {
     const newTracker: Tracker = {
@@ -1967,6 +1998,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         addHabit,
         deleteHabit,
         toggleHabitLog,
+        setHabitLog,
         addTracker,
         deleteTracker,
         addTrackerLog,
