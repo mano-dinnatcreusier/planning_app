@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useGoals } from '../context/GoalContext';
-import { Database, X, CheckCircle, AlertTriangle, Copy, Check, Sparkles, User, LogOut } from 'lucide-react';
+import { Database, X, CheckCircle, AlertTriangle, Copy, Check, Sparkles, User, LogOut, RefreshCw } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -18,7 +18,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     clearDatabase,
     loadDemoData,
     user,
-    logout
+    logout,
+    syncCloudNow
   } = useGoals();
 
   const [url, setUrl] = useState(supabaseConfig.url);
@@ -29,6 +30,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   const [copied, setCopied] = useState(false);
   const [copiedMigration, setCopiedMigration] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
+  const handleSyncNow = async () => {
+    setIsSyncing(true);
+    setSyncFeedback(null);
+    try {
+      await syncCloudNow();
+      setSyncFeedback("Synchronisation réussie !");
+      setTimeout(() => setSyncFeedback(null), 3000);
+    } catch (err: any) {
+      setSyncFeedback("Échec de la synchronisation.");
+      setTimeout(() => setSyncFeedback(null), 3000);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -174,7 +192,68 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     ai_api_key TEXT,
     ai_model TEXT DEFAULT 'deepseek-chat',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL
-);`;
+);
+
+-- Table des Indicateurs de Suivi (Trackers)
+CREATE TABLE IF NOT EXISTS public.trackers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    periodicity TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+-- Table des journaux de suivi
+CREATE TABLE IF NOT EXISTS public.tracker_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tracker_id UUID REFERENCES public.trackers(id) ON DELETE CASCADE,
+    date TEXT NOT NULL,
+    value TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Tables de Musculation Strong
+CREATE TABLE IF NOT EXISTS public.strong_exercises (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS public.strong_workouts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    date TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS public.strong_workout_sets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workout_id UUID REFERENCES public.strong_workouts(id) ON DELETE CASCADE,
+    exercise_name TEXT NOT NULL,
+    set_order INTEGER NOT NULL,
+    weight NUMERIC NOT NULL,
+    reps INTEGER NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Activation de la sécurité RLS
+ALTER TABLE public.final_goals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.milestones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subtasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.habits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.habit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.trackers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tracker_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.strong_exercises ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.strong_workouts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.strong_workout_sets ENABLE ROW LEVEL SECURITY;
+
+-- Publication temps réel (Supabase Realtime)
+ALTER PUBLICATION supabase_realtime ADD TABLE public.final_goals, public.milestones, public.subtasks, public.habits, public.habit_logs, public.trackers, public.tracker_logs, public.strong_exercises, public.strong_workouts, public.strong_workout_sets;`;
 
     navigator.clipboard.writeText(sql);
     setCopied(true);
@@ -319,31 +398,63 @@ CREATE TABLE IF NOT EXISTS user_profiles (
                     <span style={{ fontSize: '0.7rem', color: 'var(--text-low)' }}>Compte Cloud Actif</span>
                   </div>
                 </div>
-                <button
-                  onClick={() => {
-                    logout();
-                    onClose();
-                  }}
-                  style={{
-                    backgroundColor: 'rgba(244, 63, 94, 0.08)',
-                    border: '1px solid rgba(244, 63, 94, 0.2)',
-                    color: '#fb7185',
-                    borderRadius: 'var(--border-radius-sm)',
-                    padding: '6px 12px',
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    transition: 'var(--transition-fast)'
-                  }}
-                  onMouseOver={(e) => { e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.15)'; }}
-                  onMouseOut={(e) => { e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.08)'; }}
-                >
-                  <LogOut size={12} />
-                  Déconnexion
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {syncFeedback && (
+                    <span style={{ fontSize: '0.72rem', color: syncFeedback.includes('réussie') ? 'var(--accent-success)' : 'var(--accent-danger)' }}>
+                      {syncFeedback}
+                    </span>
+                  )}
+                  <button
+                    onClick={handleSyncNow}
+                    disabled={isSyncing}
+                    title="Forcer la synchronisation avec le cloud"
+                    style={{
+                      backgroundColor: 'rgba(168, 85, 247, 0.08)',
+                      border: '1px solid rgba(168, 85, 247, 0.2)',
+                      color: 'var(--accent-primary)',
+                      borderRadius: 'var(--border-radius-sm)',
+                      padding: '6px 12px',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      cursor: isSyncing ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'var(--transition-fast)',
+                      opacity: isSyncing ? 0.7 : 1
+                    }}
+                    onMouseOver={(e) => { if (!isSyncing) e.currentTarget.style.backgroundColor = 'rgba(168, 85, 247, 0.15)'; }}
+                    onMouseOut={(e) => { if (!isSyncing) e.currentTarget.style.backgroundColor = 'rgba(168, 85, 247, 0.08)'; }}
+                  >
+                    <RefreshCw size={12} className={isSyncing ? "animate-spin" : ""} />
+                    {isSyncing ? 'Synchro...' : 'Synchroniser'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      logout();
+                      onClose();
+                    }}
+                    style={{
+                      backgroundColor: 'rgba(244, 63, 94, 0.08)',
+                      border: '1px solid rgba(244, 63, 94, 0.2)',
+                      color: '#fb7185',
+                      borderRadius: 'var(--border-radius-sm)',
+                      padding: '6px 12px',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'var(--transition-fast)'
+                    }}
+                    onMouseOver={(e) => { e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.15)'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.08)'; }}
+                  >
+                    <LogOut size={12} />
+                    Déconnexion
+                  </button>
+                </div>
               </>
             ) : (
               <>
@@ -709,7 +820,54 @@ CREATE TABLE IF NOT EXISTS habit_logs (
     date DATE NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('done', 'missed')),
     PRIMARY KEY (habit_id, date)
-);`}
+);
+
+-- Table des Indicateurs de Suivi (Trackers)
+CREATE TABLE IF NOT EXISTS trackers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    periodicity TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tracker_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tracker_id UUID REFERENCES trackers(id) ON DELETE CASCADE,
+    date TEXT NOT NULL,
+    value TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Tables de Musculation Strong
+CREATE TABLE IF NOT EXISTS strong_exercises (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS strong_workouts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    date TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS strong_workout_sets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workout_id UUID REFERENCES strong_workouts(id) ON DELETE CASCADE,
+    exercise_name TEXT NOT NULL,
+    set_order INTEGER NOT NULL,
+    weight NUMERIC NOT NULL,
+    reps INTEGER NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Activation de la synchronisation en temps réel (Realtime)
+ALTER PUBLICATION supabase_realtime ADD TABLE final_goals, milestones, subtasks, habits, habit_logs, trackers, tracker_logs, strong_exercises, strong_workouts, strong_workout_sets;`}
           </pre>
         </div>
 

@@ -53,6 +53,7 @@ interface GoalContextType {
   deleteStrongWorkout: (id: string) => Promise<void>;
   importStrongCSVData: (csvContent: string) => Promise<{ workoutsCount: number; exercisesCount: number; savedToCloud: boolean }>;
   // Config & Demo Data
+  syncCloudNow: () => Promise<void>;
   saveSupabaseConfig: (url: string, key: string) => Promise<boolean>;
   saveAiConfig: (url: string, apiKey: string, model: string) => Promise<void>;
   clearDatabase: () => Promise<void>;
@@ -133,6 +134,38 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [isSupabaseConnected, user, authInitialized]);
 
+  // Synchronisation continue Mobile / PC : réveil au focus/visibilité et Supabase Realtime
+  useEffect(() => {
+    const supabase = getSupabase();
+    if (!supabase || !user) return;
+
+    // 1. Re-synchroniser dès que l'utilisateur revient sur l'onglet ou déverrouille son téléphone
+    const handleSyncOnVisible = () => {
+      if (document.visibilityState === 'visible') {
+        console.log("Application revenue au premier plan, synchronisation Cloud...");
+        loadAllData();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleSyncOnVisible);
+    window.addEventListener('focus', handleSyncOnVisible);
+
+    // 2. Écoute temps-réel via Supabase Realtime (si publication activée)
+    const channel = supabase
+      .channel('app-realtime-sync')
+      .on('postgres_changes', { event: '*', schema: 'public' }, () => {
+        console.log("Modification Cloud détectée en temps réel, mise à jour...");
+        loadAllData();
+      })
+      .subscribe();
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleSyncOnVisible);
+      window.removeEventListener('focus', handleSyncOnVisible);
+      supabase.removeChannel(channel);
+    };
+  }, [isSupabaseConnected, user, supabaseConfig.url, supabaseConfig.anonKey]);
+
   // Read data
   const loadAllData = async () => {
     setLoading(true);
@@ -206,47 +239,57 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           };
 
-          if (validFgData.length === 0) {
-            const fgLocalStr = safeGetItem('fg_goals');
-            const msLocalStr = safeGetItem('fg_milestones');
-            const stLocalStr = safeGetItem('fg_subtasks');
+          // 1. Migration incrémentale des Objectifs, Jalons et Sous-tâches locaux non présents sur le Cloud
+          const localFg = safeParse(safeGetItem('fg_goals'));
+          const localMs = safeParse(safeGetItem('fg_milestones'));
+          const localSt = safeParse(safeGetItem('fg_subtasks'));
 
-            const localFg = safeParse(fgLocalStr);
-            const localMs = safeParse(msLocalStr);
-            const localSt = safeParse(stLocalStr);
+          const existingGoalIds = new Set(validFgData.map(g => g.id));
+          const missingGoals = localFg.filter((g: any) => !existingGoalIds.has(g.id));
 
-            if (localFg.length > 0) {
-              console.log("Migrating local storage goals to the cloud for user id:", userId);
-              const goalsToUpload = localFg.map((g: any) => ({ ...g, user_id: userId }));
-              await supabase.from('final_goals').insert(goalsToUpload);
+          if (missingGoals.length > 0) {
+            console.log(`Synchronisation Cloud: migration de ${missingGoals.length} objectifs locaux vers le cloud...`);
+            const goalsToUpload = missingGoals.map((g: any) => ({ ...g, user_id: userId }));
+            await supabase.from('final_goals').insert(goalsToUpload);
+            migrated = true;
+          }
 
-              if (localMs.length > 0) {
-                await supabase.from('milestones').insert(localMs);
-              }
-              if (localSt.length > 0) {
-                await supabase.from('subtasks').insert(localSt);
-              }
+          if (localMs.length > 0) {
+            const { data: existingMs } = await supabase.from('milestones').select('id');
+            const existingMsIds = new Set((existingMs || []).map((m: any) => m.id));
+            const missingMs = localMs.filter((m: any) => !existingMsIds.has(m.id));
+            if (missingMs.length > 0) {
+              await supabase.from('milestones').insert(missingMs);
               migrated = true;
             }
           }
 
-          if (validHbData.length === 0) {
-            const hbLocalStr = safeGetItem('fg_habits');
-            const hblLocalStr = safeGetItem('fg_habit_logs');
-
-            const localHb = safeParse(hbLocalStr);
-            const localHbl = safeParse(hblLocalStr);
-
-            if (localHb.length > 0) {
-              console.log("Migrating local storage habits to the cloud for user id:", userId);
-              const habitsToUpload = localHb.map((h: any) => ({ ...h, user_id: userId }));
-              await supabase.from('habits').insert(habitsToUpload);
-
-              if (localHbl.length > 0) {
-                await supabase.from('habit_logs').insert(localHbl);
-              }
+          if (localSt.length > 0) {
+            const { data: existingSt } = await supabase.from('subtasks').select('id');
+            const existingStIds = new Set((existingSt || []).map((s: any) => s.id));
+            const missingSt = localSt.filter((s: any) => !existingStIds.has(s.id));
+            if (missingSt.length > 0) {
+              await supabase.from('subtasks').insert(missingSt);
               migrated = true;
             }
+          }
+
+          // 2. Migration incrémentale des Habitudes et Journaux
+          const localHb = safeParse(safeGetItem('fg_habits'));
+          const localHbl = safeParse(safeGetItem('fg_habit_logs'));
+
+          const existingHbIds = new Set(validHbData.map(h => h.id));
+          const missingHb = localHb.filter((h: any) => !existingHbIds.has(h.id));
+
+          if (missingHb.length > 0) {
+            console.log(`Synchronisation Cloud: migration de ${missingHb.length} habitudes locales vers le cloud...`);
+            const habitsToUpload = missingHb.map((h: any) => ({ ...h, user_id: userId }));
+            await supabase.from('habits').insert(habitsToUpload);
+            migrated = true;
+          }
+
+          if (localHbl.length > 0) {
+            await supabase.from('habit_logs').upsert(localHbl);
           }
 
           if (migrated) {
@@ -305,7 +348,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
             hblData = data || [];
           }
 
-          // Fetch Trackers and Tracker Logs
+          // Fetch Trackers and Tracker Logs with Auto-Migration
           let trData: Tracker[] = [];
           let trlData: TrackerLog[] = [];
           try {
@@ -318,6 +361,37 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (trackersErr) throw trackersErr;
             trData = trackersData || [];
 
+            // Auto-migration des Trackers locaux
+            const localTrackers = safeParse(safeGetItem('fg_trackers'));
+            const localTrackerLogs = safeParse(safeGetItem('fg_tracker_logs'));
+
+            const existingTrIds = new Set(trData.map(t => t.id));
+            const existingTrNames = new Set(trData.map(t => t.name.toLowerCase().trim()));
+            const missingTrackers = localTrackers.filter((t: Tracker) => 
+              !existingTrIds.has(t.id) && !existingTrNames.has(t.name.toLowerCase().trim())
+            );
+
+            if (missingTrackers.length > 0) {
+              console.log(`Synchronisation Cloud: migration de ${missingTrackers.length} indicateurs de suivi locaux vers le cloud...`);
+              const trackersToUpload = missingTrackers.map((t: Tracker) => ({
+                id: t.id,
+                name: t.name,
+                periodicity: t.periodicity,
+                unit: t.unit,
+                created_at: t.created_at || new Date().toISOString(),
+                user_id: userId
+              }));
+              const { error: insErr } = await supabase.from('trackers').insert(trackersToUpload);
+              if (!insErr) {
+                const { data: refreshedTr } = await supabase
+                  .from('trackers')
+                  .select('*')
+                  .eq('user_id', userId)
+                  .order('created_at', { ascending: false });
+                trData = refreshedTr || [];
+              }
+            }
+
             if (trData.length > 0) {
               const trIds = trData.map(t => t.id);
               const { data: logsData, error: logsErr } = await supabase
@@ -328,15 +402,49 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
               
               if (logsErr) throw logsErr;
               trlData = logsData || [];
+
+              // Auto-migration des entrées de suivi locales
+              if (localTrackerLogs.length > 0) {
+                const existingLogIds = new Set(trlData.map(l => l.id));
+                const missingLogs = localTrackerLogs.filter((l: TrackerLog) => 
+                  trIds.includes(l.tracker_id) && !existingLogIds.has(l.id)
+                );
+                if (missingLogs.length > 0) {
+                  console.log(`Synchronisation Cloud: migration de ${missingLogs.length} entrées de suivi locales...`);
+                  const logsToUpload = missingLogs.map((l: TrackerLog) => ({
+                    id: l.id || crypto.randomUUID(),
+                    tracker_id: l.tracker_id,
+                    date: l.date,
+                    value: l.value,
+                    created_at: l.created_at || new Date().toISOString()
+                  }));
+                  await supabase.from('tracker_logs').upsert(logsToUpload);
+                  const { data: refreshedLogs } = await supabase
+                    .from('tracker_logs')
+                    .select('*')
+                    .in('tracker_id', trIds)
+                    .order('date', { ascending: false });
+                  trlData = refreshedLogs || [];
+                }
+              }
             }
-            setTrackers(trData);
-            setTrackerLogs(trlData);
+            if (trData.length === 0 && localTrackers.length > 0) {
+              // Si le Cloud n'a pas encore de trackers mais que des trackers existent en local, les conserver précieusement
+              setTrackers(localTrackers);
+              setTrackerLogs(localTrackerLogs);
+            } else {
+              setTrackers(trData);
+              setTrackerLogs(trlData);
+              if (trData.length > 0) {
+                syncTrackersToLocalStorage(trData, trlData);
+              }
+            }
           } catch (trackerDbErr) {
             console.warn("Could not load trackers from Supabase (tables might not exist). Falling back to LocalStorage.", trackerDbErr);
             loadTrackersFromLocalStorage();
           }
 
-          // Fetch Strong Exercises and Workouts
+          // Fetch Strong Exercises and Workouts with Auto-Migration
           let strongExData: StrongExercise[] = [];
           let strongWoData: StrongWorkout[] = [];
           try {
@@ -347,6 +455,28 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
               .order('name', { ascending: true });
             if (exErr) throw exErr;
             strongExData = exData || [];
+
+            // Auto-migration des exercices Strong locaux
+            const localExercises = safeParse(safeGetItem('fg_strong_exercises'));
+            const existingExNames = new Set(strongExData.map(e => e.name.toLowerCase().trim()));
+            const missingExercises = localExercises.filter((e: StrongExercise) => !existingExNames.has(e.name.toLowerCase().trim()));
+
+            if (missingExercises.length > 0) {
+              console.log(`Synchronisation Cloud: migration de ${missingExercises.length} exercices Strong locaux...`);
+              const exToUpload = missingExercises.map((e: StrongExercise) => ({
+                id: e.id || crypto.randomUUID(),
+                name: e.name.trim(),
+                user_id: userId,
+                created_at: e.created_at || new Date().toISOString()
+              }));
+              await supabase.from('strong_exercises').insert(exToUpload);
+              const { data: refreshedEx } = await supabase
+                .from('strong_exercises')
+                .select('*')
+                .eq('user_id', userId)
+                .order('name', { ascending: true });
+              strongExData = refreshedEx || [];
+            }
             setStrongExercises(strongExData);
 
             const { data: woData, error: woErr } = await supabase
@@ -356,6 +486,42 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
               .order('date', { ascending: false });
             if (woErr) throw woErr;
             const rawWorkouts = woData || [];
+
+            // Auto-migration des séances Strong locales
+            const localWorkouts = safeParse(safeGetItem('fg_strong_workouts'));
+            const existingWoIds = new Set(rawWorkouts.map(w => w.id));
+            const missingWorkouts = localWorkouts.filter((w: StrongWorkout) => !existingWoIds.has(w.id));
+
+            if (missingWorkouts.length > 0) {
+              console.log(`Synchronisation Cloud: migration de ${missingWorkouts.length} séances Strong locales...`);
+              for (const mw of missingWorkouts) {
+                await supabase.from('strong_workouts').insert({
+                  id: mw.id,
+                  date: mw.date,
+                  name: mw.name,
+                  user_id: userId,
+                  created_at: mw.created_at || new Date().toISOString()
+                });
+                if (mw.sets && mw.sets.length > 0) {
+                  const setsToInsert = mw.sets.map((s: any, idx: number) => ({
+                    workout_id: mw.id,
+                    exercise_name: s.exercise_name,
+                    set_order: s.set_order ?? (idx + 1),
+                    weight: Number(s.weight) || 0,
+                    reps: Number(s.reps) || 0,
+                    created_at: mw.created_at || new Date().toISOString()
+                  }));
+                  await supabase.from('strong_workout_sets').insert(setsToInsert);
+                }
+              }
+              const { data: refWorkouts } = await supabase
+                .from('strong_workouts')
+                .select('*')
+                .eq('user_id', userId)
+                .order('date', { ascending: false });
+              rawWorkouts.length = 0;
+              rawWorkouts.push(...(refWorkouts || []));
+            }
 
             if (rawWorkouts.length > 0) {
               const woIds = rawWorkouts.map(w => w.id);
@@ -381,7 +547,17 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }))
               }));
             }
-            setStrongWorkouts(strongWoData);
+            if (strongWoData.length === 0 && localWorkouts.length > 0) {
+              setStrongWorkouts(localWorkouts);
+            } else {
+              setStrongWorkouts(strongWoData);
+              if (strongWoData.length > 0) {
+                syncStrongToLocalStorage(strongExData, strongWoData);
+              }
+            }
+            if (strongExData.length === 0 && localExercises.length > 0) {
+              setStrongExercises(localExercises);
+            }
           } catch (strongDbErr) {
             console.warn("Could not load strong data from Supabase. Falling back to LocalStorage.", strongDbErr);
             loadStrongFromLocalStorage();
@@ -392,6 +568,9 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setSubtasks(stData);
           setHabits(validHbData);
           setHabitLogs(hblData);
+          // Garder le cache local synchronisé pour la résilience hors-ligne
+          syncToLocalStorage(validFgData, msData, stData);
+          syncHabitsToLocalStorage(validHbData, hblData);
         } catch (err) {
           console.error('Supabase failed, falling back to LocalStorage', err);
           loadFromLocalStorage();
@@ -459,15 +638,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await supabase.auth.signOut();
     }
     setUser(null);
-    setFinalGoals([]);
-    setMilestones([]);
-    setSubtasks([]);
-    setHabits([]);
-    setHabitLogs([]);
-    setTrackers([]);
-    setTrackerLogs([]);
-    setStrongExercises([]);
-    setStrongWorkouts([]);
+    loadFromLocalStorage();
   };
 
   const loadFromLocalStorage = () => {
@@ -1716,6 +1887,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         addStrongWorkout,
         deleteStrongWorkout,
         importStrongCSVData,
+        syncCloudNow: loadAllData,
         saveSupabaseConfig,
         saveAiConfig,
         clearDatabase,
