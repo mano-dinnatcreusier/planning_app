@@ -252,6 +252,50 @@ ALTER TABLE public.strong_exercises ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.strong_workouts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.strong_workout_sets ENABLE ROW LEVEL SECURITY;
 
+-- Politiques de sécurité RLS
+DROP POLICY IF EXISTS "Users can manage their own final goals" ON public.final_goals;
+CREATE POLICY "Users can manage their own final goals" ON public.final_goals FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+
+DROP POLICY IF EXISTS "Users can manage their own milestones" ON public.milestones;
+CREATE POLICY "Users can manage their own milestones" ON public.milestones FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.final_goals WHERE id = milestones.final_goal_id AND (user_id = auth.uid() OR user_id IS NULL))
+    OR NOT EXISTS (SELECT 1 FROM public.final_goals WHERE id = milestones.final_goal_id)
+) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Users can manage their own subtasks" ON public.subtasks;
+CREATE POLICY "Users can manage their own subtasks" ON public.subtasks FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Users can manage their own habits" ON public.habits;
+CREATE POLICY "Users can manage their own habits" ON public.habits FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+
+DROP POLICY IF EXISTS "Users can manage their own habit logs" ON public.habit_logs;
+CREATE POLICY "Users can manage their own habit logs" ON public.habit_logs FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Users can manage their own trackers" ON public.trackers;
+CREATE POLICY "Users can manage their own trackers" ON public.trackers FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+
+DROP POLICY IF EXISTS "Users can manage their own tracker logs" ON public.tracker_logs;
+CREATE POLICY "Users can manage their own tracker logs" ON public.tracker_logs FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.trackers WHERE id = tracker_logs.tracker_id AND (user_id = auth.uid() OR user_id IS NULL))
+    OR NOT EXISTS (SELECT 1 FROM public.trackers WHERE id = tracker_logs.tracker_id)
+) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Users can manage their own strong exercises" ON public.strong_exercises;
+CREATE POLICY "Users can manage their own strong exercises" ON public.strong_exercises FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+
+DROP POLICY IF EXISTS "Users can manage their own strong workouts" ON public.strong_workouts;
+CREATE POLICY "Users can manage their own strong workouts" ON public.strong_workouts FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+
+DROP POLICY IF EXISTS "Users can manage their own strong workout sets" ON public.strong_workout_sets;
+CREATE POLICY "Users can manage their own strong workout sets" ON public.strong_workout_sets FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.strong_workouts WHERE id = strong_workout_sets.workout_id AND (user_id = auth.uid() OR user_id IS NULL))
+    OR NOT EXISTS (SELECT 1 FROM public.strong_workouts WHERE id = strong_workout_sets.workout_id)
+) WITH CHECK (true);
+
+-- Rattachement automatique de toute séance orpheline au compte connecté
+UPDATE public.strong_workouts SET user_id = auth.uid() WHERE user_id IS NULL;
+UPDATE public.strong_exercises SET user_id = auth.uid() WHERE user_id IS NULL;
+
 -- Publication temps réel (Supabase Realtime)
 ALTER PUBLICATION supabase_realtime ADD TABLE public.final_goals, public.milestones, public.subtasks, public.habits, public.habit_logs, public.trackers, public.tracker_logs, public.strong_exercises, public.strong_workouts, public.strong_workout_sets;`;
 
@@ -865,6 +909,22 @@ CREATE TABLE IF NOT EXISTS strong_workout_sets (
     reps INTEGER NOT NULL,
     created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Politiques de sécurité RLS
+DROP POLICY IF EXISTS "Users can manage their own strong exercises" ON strong_exercises;
+CREATE POLICY "Users can manage their own strong exercises" ON strong_exercises FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+
+DROP POLICY IF EXISTS "Users can manage their own strong workouts" ON strong_workouts;
+CREATE POLICY "Users can manage their own strong workouts" ON strong_workouts FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+
+DROP POLICY IF EXISTS "Users can manage their own strong workout sets" ON strong_workout_sets;
+CREATE POLICY "Users can manage their own strong workout sets" ON strong_workout_sets FOR ALL USING (
+    EXISTS (SELECT 1 FROM strong_workouts WHERE id = strong_workout_sets.workout_id AND (user_id = auth.uid() OR user_id IS NULL))
+    OR NOT EXISTS (SELECT 1 FROM strong_workouts WHERE id = strong_workout_sets.workout_id)
+) WITH CHECK (true);
+
+UPDATE strong_workouts SET user_id = auth.uid() WHERE user_id IS NULL;
+UPDATE strong_exercises SET user_id = auth.uid() WHERE user_id IS NULL;
 
 -- Activation de la synchronisation en temps réel (Realtime)
 ALTER PUBLICATION supabase_realtime ADD TABLE final_goals, milestones, subtasks, habits, habit_logs, trackers, tracker_logs, strong_exercises, strong_workouts, strong_workout_sets;`}

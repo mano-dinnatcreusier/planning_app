@@ -461,14 +461,22 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Fetch Strong Exercises and Workouts with Auto-Migration
           let strongExData: StrongExercise[] = [];
           let strongWoData: StrongWorkout[] = [];
+
+          // 1. Fetch Exercises independently
           try {
             const { data: exData, error: exErr } = await supabase
               .from('strong_exercises')
               .select('*')
-              .eq('user_id', userId)
+              .or(`user_id.eq.${userId},user_id.is.null`)
               .order('name', { ascending: true });
-            if (exErr) throw exErr;
-            strongExData = exData || [];
+
+            if (exErr) {
+              console.warn("Could not query strong_exercises with user_id filter, trying fallback:", exErr);
+              const { data: fbEx } = await supabase.from('strong_exercises').select('*').order('name', { ascending: true });
+              strongExData = fbEx || [];
+            } else {
+              strongExData = exData || [];
+            }
 
             // Auto-migration des exercices Strong locaux
             const localExercises = safeParse(safeGetItem('fg_strong_exercises'));
@@ -483,23 +491,62 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 user_id: userId,
                 created_at: e.created_at || new Date().toISOString()
               }));
-              await supabase.from('strong_exercises').upsert(exToUpload, { onConflict: 'user_id,name' });
+              try {
+                await supabase.from('strong_exercises').upsert(exToUpload, { onConflict: 'user_id,name' });
+              } catch {
+                await supabase.from('strong_exercises').insert(exToUpload);
+              }
               const { data: refreshedEx } = await supabase
                 .from('strong_exercises')
                 .select('*')
-                .eq('user_id', userId)
+                .or(`user_id.eq.${userId},user_id.is.null`)
                 .order('name', { ascending: true });
-              strongExData = refreshedEx || [];
+              strongExData = refreshedEx || strongExData;
             }
-            setStrongExercises(strongExData);
 
+            if (strongExData.length === 0 && localExercises.length > 0) {
+              setStrongExercises(localExercises);
+            } else {
+              setStrongExercises(strongExData);
+            }
+          } catch (exErr) {
+            console.warn("Erreur globale récupération strong_exercises:", exErr);
+            const localExercises = safeParse(safeGetItem('fg_strong_exercises'));
+            if (localExercises.length > 0) setStrongExercises(localExercises);
+          }
+
+          // 2. Fetch Workouts and Sets independently
+          try {
+            let rawWorkouts: any[] = [];
             const { data: woData, error: woErr } = await supabase
               .from('strong_workouts')
               .select('*')
-              .eq('user_id', userId)
+              .or(`user_id.eq.${userId},user_id.is.null`)
               .order('date', { ascending: false });
-            if (woErr) throw woErr;
-            const rawWorkouts = woData || [];
+
+            if (woErr) {
+              console.warn("Could not query strong_workouts with user_id filter, trying fallback select('*'):", woErr);
+              const { data: fbWo, error: fbErr } = await supabase
+                .from('strong_workouts')
+                .select('*')
+                .order('date', { ascending: false });
+              if (fbErr) {
+                console.error("Critical error fetching strong_workouts:", fbErr);
+              } else {
+                rawWorkouts = fbWo || [];
+              }
+            } else {
+              rawWorkouts = woData || [];
+            }
+
+            console.log(`Supabase Strong: ${rawWorkouts.length} séances brutes trouvées en base.`);
+
+            // Auto-réparation des séances orphelines (user_id IS NULL)
+            const orphanedWorkouts = rawWorkouts.filter(w => !w.user_id);
+            if (orphanedWorkouts.length > 0) {
+              const orphanIds = orphanedWorkouts.map(w => w.id);
+              supabase.from('strong_workouts').update({ user_id: userId }).in('id', orphanIds).then();
+            }
 
             // Auto-migration des séances Strong locales en batch optimisé
             const localWorkouts = safeParse(safeGetItem('fg_strong_workouts'));
@@ -543,37 +590,56 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const { data: refWorkouts } = await supabase
                 .from('strong_workouts')
                 .select('*')
-                .eq('user_id', userId)
+                .or(`user_id.eq.${userId},user_id.is.null`)
                 .order('date', { ascending: false });
               rawWorkouts.length = 0;
               rawWorkouts.push(...(refWorkouts || []));
             }
 
+            // Chargement des séries par lots de 30 séances pour éviter l'erreur HTTP 414 (URL trop longue)
+            const allSets: any[] = [];
             if (rawWorkouts.length > 0) {
               const woIds = rawWorkouts.map(w => w.id);
-              const { data: setsData, error: setsErr } = await supabase
-                .from('strong_workout_sets')
-                .select('*')
-                .in('workout_id', woIds)
-                .order('set_order', { ascending: true });
-              if (setsErr) throw setsErr;
-              const allSets = setsData || [];
-              
+              const CHUNK_SIZE = 30;
+              for (let i = 0; i < woIds.length; i += CHUNK_SIZE) {
+                const chunkIds = woIds.slice(i, i + CHUNK_SIZE);
+                try {
+                  const { data: chunkSets, error: chunkErr } = await supabase
+                    .from('strong_workout_sets')
+                    .select('*')
+                    .in('workout_id', chunkIds)
+                    .order('set_order', { ascending: true })
+                    .limit(5000);
+
+                  if (chunkErr) {
+                    console.warn(`Erreur lot ${Math.floor(i / CHUNK_SIZE) + 1} de strong_workout_sets:`, chunkErr);
+                  } else if (chunkSets) {
+                    allSets.push(...chunkSets);
+                  }
+                } catch (chunkEx) {
+                  console.warn("Exception récupération lot sets:", chunkEx);
+                }
+              }
+
+              console.log(`Supabase Strong: ${allSets.length} séries chargées pour ${rawWorkouts.length} séances.`);
+
               strongWoData = rawWorkouts.map(w => ({
                 id: w.id,
-                date: w.date,
-                name: w.name,
-                user_id: w.user_id,
+                date: w.date ? String(w.date).split('T')[0] : new Date().toISOString().split('T')[0],
+                name: w.name || "Entraînement de musculation",
+                user_id: w.user_id || userId,
                 created_at: w.created_at,
-                sets: allSets.filter(s => s.workout_id === w.id).map(s => ({
-                  exercise_name: s.exercise_name,
-                  weight: Number(s.weight),
-                  reps: Number(s.reps),
-                  set_order: s.set_order
+                sets: (allSets.filter(s => s.workout_id === w.id) || []).map(s => ({
+                  exercise_name: s.exercise_name || "Exercice",
+                  weight: Number(s.weight) || 0,
+                  reps: Number(s.reps) || 0,
+                  set_order: Number(s.set_order) || 1
                 }))
               }));
             }
+
             if (strongWoData.length === 0 && localWorkouts.length > 0) {
+              console.log("Aucune séance trouvée sur Supabase, conservation du cache local.");
               setStrongWorkouts(localWorkouts);
             } else {
               setStrongWorkouts(strongWoData);
@@ -581,12 +647,10 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 syncStrongToLocalStorage(strongExData, strongWoData);
               }
             }
-            if (strongExData.length === 0 && localExercises.length > 0) {
-              setStrongExercises(localExercises);
-            }
-          } catch (strongDbErr) {
-            console.warn("Could not load strong data from Supabase. Falling back to LocalStorage.", strongDbErr);
-            loadStrongFromLocalStorage();
+          } catch (woGlobalErr) {
+            console.error("Erreur globale lors du chargement des séances Strong:", woGlobalErr);
+            const localWorkouts = safeParse(safeGetItem('fg_strong_workouts'));
+            if (localWorkouts.length > 0) setStrongWorkouts(localWorkouts);
           }
 
           setFinalGoals(validFgData);

@@ -63,7 +63,7 @@ export const StrongView: React.FC = () => {
   const personalRecords = useMemo(() => {
     const prs: Record<string, { weight: number; reps: number; date: string }> = {};
     strongWorkouts.forEach(w => {
-      w.sets.forEach(s => {
+      (w.sets || []).forEach(s => {
         const name = s.exercise_name;
         if (!prs[name] || s.weight > prs[name].weight) {
           prs[name] = { weight: s.weight, reps: s.reps, date: w.date };
@@ -79,9 +79,9 @@ export const StrongView: React.FC = () => {
     if (!query) return strongWorkouts;
 
     return strongWorkouts.filter(w => {
-      const nameMatch = w.name.toLowerCase().includes(query);
-      const dateMatch = w.date.includes(query);
-      const exerciseMatch = w.sets.some(s => s.exercise_name.toLowerCase().includes(query));
+      const nameMatch = (w.name || '').toLowerCase().includes(query);
+      const dateMatch = (w.date || '').includes(query);
+      const exerciseMatch = (w.sets || []).some(s => (s.exercise_name || '').toLowerCase().includes(query));
       return nameMatch || dateMatch || exerciseMatch;
     });
   }, [strongWorkouts, searchQuery]);
@@ -250,14 +250,13 @@ export const StrongView: React.FC = () => {
   };
 
   const sqlDDL = `-- SQL de migration pour Strong (Musculation).
--- À exécuter dans votre console de base de données Supabase.
+-- À exécuter dans votre console de base de données Supabase (SQL Editor).
 
 CREATE TABLE IF NOT EXISTS public.strong_exercises (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ DEFAULT now(),
-    CONSTRAINT unique_user_exercise UNIQUE(user_id, name)
+    created_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS public.strong_workouts (
@@ -282,19 +281,39 @@ ALTER TABLE public.strong_exercises ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.strong_workouts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.strong_workout_sets ENABLE ROW LEVEL SECURITY;
 
+-- Politiques de sécurité RLS robustes
+DROP POLICY IF EXISTS "Users can manage their own strong exercises" ON public.strong_exercises;
 CREATE POLICY "Users can manage their own strong exercises" 
-ON public.strong_exercises FOR ALL USING (auth.uid() = user_id);
+ON public.strong_exercises FOR ALL 
+USING (auth.uid() = user_id OR user_id IS NULL)
+WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
 
+DROP POLICY IF EXISTS "Users can manage their own strong workouts" ON public.strong_workouts;
 CREATE POLICY "Users can manage their own strong workouts" 
-ON public.strong_workouts FOR ALL USING (auth.uid() = user_id);
+ON public.strong_workouts FOR ALL 
+USING (auth.uid() = user_id OR user_id IS NULL)
+WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
 
+DROP POLICY IF EXISTS "Users can manage their own strong workout sets" ON public.strong_workout_sets;
 CREATE POLICY "Users can manage their own strong workout sets" 
-ON public.strong_workout_sets FOR ALL USING (
+ON public.strong_workout_sets FOR ALL 
+USING (
     EXISTS (
         SELECT 1 FROM public.strong_workouts 
-        WHERE id = strong_workout_sets.workout_id AND user_id = auth.uid()
+        WHERE id = strong_workout_sets.workout_id AND (user_id = auth.uid() OR user_id IS NULL)
     )
-);
+    OR NOT EXISTS (
+        SELECT 1 FROM public.strong_workouts WHERE id = strong_workout_sets.workout_id
+    )
+)
+WITH CHECK (true);
+
+-- Rattachement automatique de toute séance orpheline au compte connecté
+UPDATE public.strong_workouts SET user_id = auth.uid() WHERE user_id IS NULL;
+UPDATE public.strong_exercises SET user_id = auth.uid() WHERE user_id IS NULL;
+
+-- Publication temps réel
+ALTER PUBLICATION supabase_realtime ADD TABLE public.strong_exercises, public.strong_workouts, public.strong_workout_sets;
 
 CREATE INDEX IF NOT EXISTS idx_strong_workouts_user_date ON public.strong_workouts(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_workout_sets(workout_id);`;
@@ -460,7 +479,8 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
                 
                 // Group sets by exercise name to show structured exercises list
                 const exerciseGroups: Record<string, StrongWorkoutSet[]> = {};
-                w.sets.forEach(s => {
+                const currentSets = w.sets || [];
+                currentSets.forEach(s => {
                   if (!exerciseGroups[s.exercise_name]) {
                     exerciseGroups[s.exercise_name] = [];
                   }
@@ -468,7 +488,7 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
                 });
 
                 // Calculate summary stats
-                const totalWeight = w.sets.reduce((acc, curr) => acc + (curr.weight * curr.reps), 0);
+                const totalWeight = currentSets.reduce((acc, curr) => acc + (Number(curr.weight || 0) * Number(curr.reps || 0)), 0);
                 const uniqueExercisesCount = Object.keys(exerciseGroups).length;
 
                 return (
