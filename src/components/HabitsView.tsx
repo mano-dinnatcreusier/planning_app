@@ -279,21 +279,10 @@ export const HabitsView: React.FC = () => {
       </div>
 
       {/* Top Segmented Control (Action vs Gestion) */}
-      <div 
-        className="glass"
-        style={{
-          display: 'inline-flex',
-          alignSelf: 'flex-start',
-          borderRadius: '50px',
-          padding: '4px',
-          gap: '4px',
-          border: '1px solid var(--border-color)',
-          maxWidth: '100%',
-          overflowX: 'auto'
-        }}
-      >
+      <div className="segmented-nav-container glass">
         <button
           onClick={() => setActiveSubTab('today')}
+          className="segmented-nav-btn"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -312,11 +301,12 @@ export const HabitsView: React.FC = () => {
           }}
         >
           <Sun size={16} />
-          <span>Aujourd'hui (Action rapide)</span>
+          <span>Aujourd'hui</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('manage')}
+          className="segmented-nav-btn"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -335,7 +325,7 @@ export const HabitsView: React.FC = () => {
           }}
         >
           <CalendarDays size={16} />
-          <span>Mes Routines & Assistant IA</span>
+          <span>Routines & IA</span>
         </button>
       </div>
 

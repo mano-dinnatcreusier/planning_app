@@ -250,15 +250,36 @@ UPDATE public.trackers SET user_id = auth.uid() WHERE user_id IS NULL;`;
       <style>{`
         .tracker-cards-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
           gap: 16px;
         }
         @media (max-width: 640px) {
           .tracker-cards-grid {
             grid-template-columns: 1fr !important;
+            gap: 12px !important;
           }
           .stats-kpis-grid {
             grid-template-columns: 1fr 1fr !important;
+            gap: 8px !important;
+          }
+          .tracking-stats-controls {
+            flex-direction: column !important;
+            align-items: stretch !important;
+            gap: 10px !important;
+          }
+          .tracking-stats-controls select {
+            width: 100% !important;
+          }
+          .time-filter-pills {
+            width: 100% !important;
+            justify-content: space-around !important;
+            display: flex !important;
+          }
+          .time-filter-pills button {
+            flex: 1 1 0 !important;
+            padding: 6px 4px !important;
+            text-align: center !important;
+            font-size: 0.72rem !important;
           }
         }
       `}</style>
@@ -435,21 +456,10 @@ UPDATE public.trackers SET user_id = auth.uid() WHERE user_id IS NULL;`;
       )}
 
       {/* Top Segmented Control (Saisie vs Statistiques) */}
-      <div 
-        className="glass"
-        style={{
-          display: 'inline-flex',
-          alignSelf: 'flex-start',
-          borderRadius: '50px',
-          padding: '4px',
-          gap: '4px',
-          border: '1px solid var(--border-color)',
-          maxWidth: '100%',
-          overflowX: 'auto'
-        }}
-      >
+      <div className="segmented-nav-container glass">
         <button
           onClick={() => setActiveSubTab('entry')}
+          className="segmented-nav-btn"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -468,11 +478,12 @@ UPDATE public.trackers SET user_id = auth.uid() WHERE user_id IS NULL;`;
           }}
         >
           <Edit3 size={16} />
-          <span>Saisie & Données</span>
+          <span>Saisie & Mesures</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('stats')}
+          className="segmented-nav-btn"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -491,7 +502,7 @@ UPDATE public.trackers SET user_id = auth.uid() WHERE user_id IS NULL;`;
           }}
         >
           <BarChart3 size={16} />
-          <span>Statistiques & Graphiques</span>
+          <span>Statistiques</span>
         </button>
       </div>
 
@@ -704,6 +715,7 @@ UPDATE public.trackers SET user_id = auth.uid() WHERE user_id IS NULL;`;
                           }}
                           style={{
                             flex: 1,
+                            minWidth: 0,
                             padding: '9px 12px',
                             borderRadius: 'var(--border-radius-sm)',
                             border: '1px solid var(--border-color)',
@@ -827,7 +839,7 @@ UPDATE public.trackers SET user_id = auth.uid() WHERE user_id IS NULL;`;
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           
           {/* Controls row: Tracker Picker & Time Filter Pills */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+          <div className="tracking-stats-controls" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
             
             {/* Tracker Dropdown */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -857,7 +869,7 @@ UPDATE public.trackers SET user_id = auth.uid() WHERE user_id IS NULL;`;
 
             {/* Time Filter Pills */}
             <div 
-              className="glass"
+              className="glass time-filter-pills"
               style={{
                 display: 'flex',
                 borderRadius: '50px',
@@ -975,10 +987,10 @@ UPDATE public.trackers SET user_id = auth.uid() WHERE user_id IS NULL;`;
                     </span>
                   </div>
 
-                  <div style={{ position: 'relative', width: '100%', overflowX: 'auto' }}>
+                  <div style={{ position: 'relative', width: '100%', minWidth: 0, overflow: 'hidden' }}>
                     <svg
                       viewBox={`0 0 ${chartPoints.svgWidth} ${chartPoints.svgHeight}`}
-                      style={{ width: '100%', height: 'auto', minWidth: '420px', display: 'block' }}
+                      style={{ width: '100%', height: 'auto', display: 'block' }}
                       onMouseLeave={() => setHoveredPoint(null)}
                     >
                       <defs>

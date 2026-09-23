@@ -536,6 +536,20 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
           font-weight: 600;
         }
         
+        .strong-subtabs {
+          display: flex;
+          gap: 12px;
+          border-bottom: 1px solid var(--border-color);
+          padding-bottom: 1px;
+          width: 100%;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+        }
+        .strong-subtabs::-webkit-scrollbar {
+          display: none;
+        }
+        
         .strong-stats-kpis {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -544,6 +558,24 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
         @media (max-width: 640px) {
           .strong-stats-kpis {
             grid-template-columns: 1fr 1fr !important;
+            gap: 8px !important;
+          }
+          .sets-grid-header, .sets-grid-row {
+            grid-template-columns: 60px 1fr 1fr 36px !important;
+            gap: 6px !important;
+          }
+          .sets-grid-header {
+            font-size: 0.65rem !important;
+          }
+          .sets-grid-row input {
+            padding: 6px 4px !important;
+            font-size: 0.8rem !important;
+            min-width: 0 !important;
+          }
+          .strong-subtab-btn {
+            padding: 8px 10px !important;
+            font-size: 0.82rem !important;
+            white-space: nowrap !important;
           }
         }
         @media (max-width: 1024px) {
@@ -569,21 +601,10 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
       </div>
 
       {/* Top Main Section Switcher */}
-      <div 
-        className="glass"
-        style={{
-          display: 'inline-flex',
-          alignSelf: 'flex-start',
-          borderRadius: '50px',
-          padding: '4px',
-          gap: '4px',
-          border: '1px solid var(--border-color)',
-          maxWidth: '100%',
-          overflowX: 'auto'
-        }}
-      >
+      <div className="segmented-nav-container glass">
         <button
           onClick={() => setMainSection('workouts')}
+          className="segmented-nav-btn"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -607,6 +628,7 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
 
         <button
           onClick={() => setMainSection('stats')}
+          className="segmented-nav-btn"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -625,7 +647,7 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
           }}
         >
           <BarChart3 size={16} />
-          <span>Statistiques & Progression</span>
+          <span>Statistiques</span>
         </button>
       </div>
 
@@ -1588,7 +1610,7 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
             </div>
 
             {/* SVG Bar Chart */}
-            <div style={{ width: '100%', overflowX: 'auto', position: 'relative' }}>
+            <div style={{ width: '100%', minWidth: 0, overflow: 'hidden', position: 'relative' }}>
               {(() => {
                 const maxVal = Math.max(...weeklyVolumeData.map(w => statsMetric === 'tonnage' ? w.tonnage : w.sets), 1);
                 const svgW = 620;
@@ -1602,7 +1624,7 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
                 const barW = Math.min(colW * 0.55, 36);
 
                 return (
-                  <svg viewBox={`0 0 ${svgW} ${svgH}`} style={{ width: '100%', minWidth: '460px', height: 'auto', display: 'block' }}>
+                  <svg viewBox={`0 0 ${svgW} ${svgH}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
                     {/* Horizontal grid lines */}
                     {[0, 0.33, 0.66, 1].map((ratio, idx) => {
                       const y = padTop + chartH * (1 - ratio);
@@ -1874,8 +1896,8 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
                   const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${padTop + plotH} L ${points[0].x.toFixed(1)} ${padTop + plotH} Z`;
 
                   return (
-                    <div style={{ width: '100%', overflowX: 'auto', position: 'relative' }}>
-                      <svg viewBox={`0 0 ${svgW} ${svgH}`} style={{ width: '100%', minWidth: '480px', height: 'auto', display: 'block' }}>
+                    <div style={{ width: '100%', minWidth: 0, overflow: 'hidden', position: 'relative' }}>
+                      <svg viewBox={`0 0 ${svgW} ${svgH}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
                         <defs>
                           <linearGradient id="exProgGrad" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#eab308" stopOpacity="0.3" />
@@ -1983,6 +2005,8 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '8px',
                             padding: '8px 12px',
                             backgroundColor: isPR ? 'rgba(234, 179, 8, 0.06)' : 'rgba(255, 255, 255, 0.02)',
                             border: isPR ? '1px solid rgba(234, 179, 8, 0.2)' : '1px solid var(--border-color)',
@@ -2000,7 +2024,7 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
                               </span>
                             )}
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                             <span>Max: <strong style={{ color: '#ffffff' }}>{s.maxWeight} kg</strong></span>
                             <span>1RM: <strong style={{ color: '#38bdf8' }}>{s.best1RM} kg</strong></span>
                             <span style={{ color: 'var(--text-low)' }}>{s.setsCount} série{s.setsCount > 1 ? 's' : ''} ({s.totalVolume} kg vol.)</span>

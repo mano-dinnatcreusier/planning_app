@@ -29,26 +29,15 @@ export const GoalsHubView: React.FC<GoalsHubViewProps> = ({
   return (
     <div className="goals-hub-container animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* Top Segmented Control */}
-      <div 
-        className="glass"
-        style={{
-          display: 'inline-flex',
-          alignSelf: 'flex-start',
-          borderRadius: '50px',
-          padding: '4px',
-          gap: '4px',
-          border: '1px solid var(--border-color)',
-          maxWidth: '100%',
-          overflowX: 'auto'
-        }}
-      >
+      <div className="segmented-nav-container glass">
         <button
           onClick={() => setSubTab('dashboard')}
+          className="segmented-nav-btn"
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            padding: '8px 18px',
+            padding: '8px 14px',
             borderRadius: '50px',
             border: 'none',
             fontSize: '0.85rem',
@@ -62,16 +51,17 @@ export const GoalsHubView: React.FC<GoalsHubViewProps> = ({
           }}
         >
           <LayoutDashboard size={16} />
-          <span>Vue d'ensemble</span>
+          <span>Aperçu</span>
         </button>
 
         <button
           onClick={() => setSubTab('timeline')}
+          className="segmented-nav-btn"
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            padding: '8px 18px',
+            padding: '8px 14px',
             borderRadius: '50px',
             border: 'none',
             fontSize: '0.85rem',
@@ -85,16 +75,17 @@ export const GoalsHubView: React.FC<GoalsHubViewProps> = ({
           }}
         >
           <CalendarRange size={16} />
-          <span>Chronologie (Timeline)</span>
+          <span>Timeline</span>
         </button>
 
         <button
           onClick={() => setSubTab('calendar')}
+          className="segmented-nav-btn"
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            padding: '8px 18px',
+            padding: '8px 14px',
             borderRadius: '50px',
             border: 'none',
             fontSize: '0.85rem',

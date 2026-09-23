@@ -202,13 +202,25 @@ export const GoalCalendar: React.FC = () => {
           }
           .calendar-main-panel {
             flex: 1 1 100% !important;
+            min-width: 0 !important;
           }
           .calendar-sidebar-panel {
             flex: 1 1 100% !important;
             max-height: none !important;
+            min-width: 0 !important;
           }
           .day-habits-column {
             order: -1 !important;
+          }
+        }
+        @media (max-width: 640px) {
+          .calendar-main-panel {
+            padding: 12px 6px !important;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+          }
+          .calendar-sidebar-panel {
+            padding: 14px 10px !important;
           }
         }
       `}</style>

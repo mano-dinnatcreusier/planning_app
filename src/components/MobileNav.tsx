@@ -45,16 +45,18 @@ export const MobileNav: React.FC<MobileNavProps> = ({
       className="mobile-nav-bar glass"
       style={{
         position: 'fixed',
-        bottom: '16px',
-        left: '16px',
-        right: '16px',
-        height: '68px',
-        borderRadius: '34px',
+        bottom: 'calc(10px + env(safe-area-inset-bottom, 0px))',
+        left: '12px',
+        right: '12px',
+        maxWidth: '480px',
+        margin: '0 auto',
+        height: '64px',
+        borderRadius: '32px',
         zIndex: 500,
         display: 'none', // Managed via media query below
         alignItems: 'center',
         justifyContent: 'space-around',
-        padding: '0 8px',
+        padding: '0 6px',
         border: '1px solid var(--border-color-hover)',
         boxShadow: '0 12px 36px rgba(0, 0, 0, 0.65)'
       }}
