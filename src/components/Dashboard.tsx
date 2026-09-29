@@ -124,7 +124,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return { text: `${diffDays} jours restants`, isOverdue: false };
   };
 
-  if (loading) {
+  if (loading && finalGoals.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: '16px' }}>
         <div style={{

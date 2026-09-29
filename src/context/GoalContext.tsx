@@ -63,22 +63,32 @@ interface GoalContextType {
 
 const GoalContext = createContext<GoalContextType | undefined>(undefined);
 
+const safeReadLocal = <T,>(key: string, fallback: T): T => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+};
+
 export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [finalGoals, setFinalGoals] = useState<FinalGoal[]>([]);
-  const [milestones, setMilestones] = useState<Milestone[]>([]);
-  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
-  const [habits, setHabits] = useState<Habit[]>([]);
-  const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
-  const [trackers, setTrackers] = useState<Tracker[]>([]);
-  const [trackerLogs, setTrackerLogs] = useState<TrackerLog[]>([]);
-  const [strongExercises, setStrongExercises] = useState<StrongExercise[]>([]);
-  const [strongWorkouts, setStrongWorkouts] = useState<StrongWorkout[]>([]);
+  const [finalGoals, setFinalGoals] = useState<FinalGoal[]>(() => safeReadLocal('fg_goals', []));
+  const [milestones, setMilestones] = useState<Milestone[]>(() => safeReadLocal('fg_milestones', []));
+  const [subtasks, setSubtasks] = useState<Subtask[]>(() => safeReadLocal('fg_subtasks', []));
+  const [habits, setHabits] = useState<Habit[]>(() => safeReadLocal('fg_habits', []));
+  const [habitLogs, setHabitLogs] = useState<HabitLog[]>(() => safeReadLocal('fg_habit_logs', []));
+  const [trackers, setTrackers] = useState<Tracker[]>(() => safeReadLocal('fg_trackers', []));
+  const [trackerLogs, setTrackerLogs] = useState<TrackerLog[]>(() => safeReadLocal('fg_tracker_logs', []));
+  const [strongExercises, setStrongExercises] = useState<StrongExercise[]>(() => safeReadLocal('fg_strong_exercises', []));
+  const [strongWorkouts, setStrongWorkouts] = useState<StrongWorkout[]>(() => safeReadLocal('fg_strong_workouts', []));
   const [loading, setLoading] = useState<boolean>(true);
   const [isSupabaseConnected, setIsSupabaseConnected] = useState<boolean>(false);
   const [supabaseConfig, setSupabaseConfig] = useState(getSupabaseConfig());
   const [aiConfig, setAiConfig] = useState(getAiConfig());
   const isPerformingLoadRef = useRef<boolean>(false);
+  const lastSyncTimeRef = useRef<number>(0);
 
   // Points helper calculations
   const calculateFinalGoalPoints = (goal: Partial<FinalGoal>) => {
@@ -141,9 +151,10 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const supabase = getSupabase();
     if (!supabase || !user) return;
 
-    // 1. Re-synchroniser dès que l'utilisateur revient sur l'onglet ou déverrouille son téléphone
+    // 1. Re-synchroniser dès que l'utilisateur revient sur l'onglet ou déverrouille son téléphone (cooldown de 30s)
     const handleSyncOnVisible = () => {
-      if (document.visibilityState === 'visible' && !isPerformingLoadRef.current) {
+      const now = Date.now();
+      if (document.visibilityState === 'visible' && !isPerformingLoadRef.current && (now - lastSyncTimeRef.current > 30000)) {
         console.log("Application revenue au premier plan, synchronisation Cloud...");
         loadAllData();
       }
@@ -516,47 +527,33 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (localExercises.length > 0) setStrongExercises(localExercises);
           }
 
-          // 2. Fetch Workouts and Sets independently
+          // 2. Fetch Workouts and Sets with Fast Delta Sync & Pagination
           try {
-            let rawWorkouts: any[] = [];
-            const { data: woData, error: woErr } = await supabase
+            const localWorkouts: StrongWorkout[] = safeParse(safeGetItem('fg_strong_workouts'));
+
+            // A. Mesure ultra-rapide du nombre total de séances en base
+            let totalCloudCount = 0;
+            const { count: cloudCount, error: countErr } = await supabase
               .from('strong_workouts')
-              .select('*')
-              .or(`user_id.eq.${userId},user_id.is.null`)
-              .order('date', { ascending: false });
+              .select('id', { count: 'exact', head: true })
+              .or(`user_id.eq.${userId},user_id.is.null`);
 
-            if (woErr) {
-              console.warn("Could not query strong_workouts with user_id filter, trying fallback select('*'):", woErr);
-              const { data: fbWo, error: fbErr } = await supabase
+            if (countErr) {
+              console.warn("Erreur comptage Cloud des séances Strong avec filtre user_id:", countErr);
+              const { count: fbCount } = await supabase
                 .from('strong_workouts')
-                .select('*')
-                .order('date', { ascending: false });
-              if (fbErr) {
-                console.error("Critical error fetching strong_workouts:", fbErr);
-              } else {
-                rawWorkouts = fbWo || [];
-              }
+                .select('id', { count: 'exact', head: true });
+              totalCloudCount = fbCount ?? 0;
             } else {
-              rawWorkouts = woData || [];
+              totalCloudCount = cloudCount ?? 0;
             }
 
-            console.log(`Supabase Strong: ${rawWorkouts.length} séances brutes trouvées en base.`);
+            console.log(`Supabase Strong: ${totalCloudCount} séances au total en base Cloud (${localWorkouts.length} en cache local).`);
 
-            // Auto-réparation des séances orphelines (user_id IS NULL)
-            const orphanedWorkouts = rawWorkouts.filter(w => !w.user_id);
-            if (orphanedWorkouts.length > 0) {
-              const orphanIds = orphanedWorkouts.map(w => w.id);
-              supabase.from('strong_workouts').update({ user_id: userId }).in('id', orphanIds).then();
-            }
-
-            // Auto-migration des séances Strong locales en batch optimisé
-            const localWorkouts = safeParse(safeGetItem('fg_strong_workouts'));
-            const existingWoIds = new Set(rawWorkouts.map(w => w.id));
-            const missingWorkouts = localWorkouts.filter((w: StrongWorkout) => !existingWoIds.has(w.id));
-
-            if (missingWorkouts.length > 0) {
-              console.log(`Synchronisation Cloud: migration de ${missingWorkouts.length} séances Strong locales...`);
-              const workoutsToInsert = missingWorkouts.map((mw: StrongWorkout) => ({
+            // Migration initiale UNIQUEMENT si le Cloud est entièrement vide mais qu'on a des séances locales
+            if (totalCloudCount === 0 && localWorkouts.length > 0) {
+              console.log(`Synchronisation Cloud: migration initiale de ${localWorkouts.length} séances Strong locales vers le Cloud...`);
+              const workoutsToInsert = localWorkouts.map((mw: StrongWorkout) => ({
                 id: mw.id,
                 date: (mw.date || new Date().toISOString().split('T')[0]).split(' ')[0],
                 name: mw.name,
@@ -569,7 +566,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
 
               const allSetsToInsert: any[] = [];
-              missingWorkouts.forEach((mw: StrongWorkout) => {
+              localWorkouts.forEach((mw: StrongWorkout) => {
                 if (mw.sets && mw.sets.length > 0) {
                   mw.sets.forEach((s: any, idx: number) => {
                     allSetsToInsert.push({
@@ -587,44 +584,102 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
               for (let i = 0; i < allSetsToInsert.length; i += 200) {
                 await supabase.from('strong_workout_sets').insert(allSetsToInsert.slice(i, i + 200));
               }
+              totalCloudCount = localWorkouts.length;
+            }
 
-              const { data: refWorkouts } = await supabase
+            // B. Détermination du volume de séances à récupérer
+            const isFreshClient = localWorkouts.length === 0 && totalCloudCount > 0;
+            let fetchLimit = 100;
+
+            if (isFreshClient) {
+              // Nouveau poste ou cache vidé : on télécharge tout l'historique
+              fetchLimit = totalCloudCount;
+            } else if (totalCloudCount > localWorkouts.length) {
+              // Plus de séances sur le Cloud qu'en local (ex: ajoutées depuis mobile)
+              // Récupère au moins l'écart + une marge de sécurité de 20, avec un minimum de 100
+              const diff = totalCloudCount - localWorkouts.length;
+              fetchLimit = Math.max(100, diff + 20);
+            } else {
+              // Cache local à jour : on rafraîchit uniquement les 100 dernières séances
+              fetchLimit = 100;
+            }
+
+            // C. Récupération paginée de ces séances (débloque la limite PostgREST de 1000)
+            const rawWorkouts: any[] = [];
+            const PAGE_SIZE = 1000;
+            let from = 0;
+
+            while (from < fetchLimit) {
+              const to = Math.min(from + PAGE_SIZE - 1, fetchLimit - 1);
+              let { data: pageData, error: pageErr } = await supabase
                 .from('strong_workouts')
                 .select('*')
                 .or(`user_id.eq.${userId},user_id.is.null`)
-                .order('date', { ascending: false });
-              rawWorkouts.length = 0;
-              rawWorkouts.push(...(refWorkouts || []));
+                .order('date', { ascending: false })
+                .range(from, to);
+
+              if (pageErr) {
+                console.warn(`Erreur page ${from}-${to} strong_workouts avec filtre user_id, repli sans filtre:`, pageErr);
+                const { data: fbPage, error: fbPageErr } = await supabase
+                  .from('strong_workouts')
+                  .select('*')
+                  .order('date', { ascending: false })
+                  .range(from, to);
+                if (fbPageErr) {
+                  console.error("Erreur critique chargement page strong_workouts:", fbPageErr);
+                  break;
+                }
+                pageData = fbPage;
+              }
+
+              if (!pageData || pageData.length === 0) break;
+              rawWorkouts.push(...pageData);
+              if (pageData.length < (to - from + 1)) break;
+              from += PAGE_SIZE;
             }
 
-            // Chargement des séries par lots de 30 séances pour éviter l'erreur HTTP 414 (URL trop longue)
+            console.log(`Supabase Strong: ${rawWorkouts.length} séances récentes récupérées du Cloud.`);
+
+            // Auto-réparation des séances orphelines (user_id IS NULL)
+            const orphanedWorkouts = rawWorkouts.filter(w => !w.user_id);
+            if (orphanedWorkouts.length > 0) {
+              const orphanIds = orphanedWorkouts.map(w => w.id);
+              supabase.from('strong_workouts').update({ user_id: userId }).in('id', orphanIds).then();
+            }
+
+            // D. Chargement ultra-rapide des séries en parallèle (lots de 50)
             const allSets: any[] = [];
             if (rawWorkouts.length > 0) {
               const woIds = rawWorkouts.map(w => w.id);
-              const CHUNK_SIZE = 30;
+              const CHUNK_SIZE = 50;
+              const chunks: string[][] = [];
               for (let i = 0; i < woIds.length; i += CHUNK_SIZE) {
-                const chunkIds = woIds.slice(i, i + CHUNK_SIZE);
-                try {
-                  const { data: chunkSets, error: chunkErr } = await supabase
-                    .from('strong_workout_sets')
-                    .select('*')
-                    .in('workout_id', chunkIds)
-                    .order('set_order', { ascending: true })
-                    .limit(5000);
+                chunks.push(woIds.slice(i, i + CHUNK_SIZE));
+              }
 
-                  if (chunkErr) {
-                    console.warn(`Erreur lot ${Math.floor(i / CHUNK_SIZE) + 1} de strong_workout_sets:`, chunkErr);
-                  } else if (chunkSets) {
-                    allSets.push(...chunkSets);
-                  }
-                } catch (chunkEx) {
-                  console.warn("Exception récupération lot sets:", chunkEx);
-                }
+              // Exécution en parallèle par vagues de 6 requêtes pour vitesse maximale
+              const CONCURRENCY = 6;
+              for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+                const batch = chunks.slice(i, i + CONCURRENCY);
+                const batchResults = await Promise.all(
+                  batch.map(chunkIds =>
+                    supabase
+                      .from('strong_workout_sets')
+                      .select('*')
+                      .in('workout_id', chunkIds)
+                      .order('set_order', { ascending: true })
+                      .limit(5000)
+                  )
+                );
+                batchResults.forEach(res => {
+                  if (res.data) allSets.push(...res.data);
+                  if (res.error) console.warn("Erreur chargement lot strong_workout_sets:", res.error);
+                });
               }
 
               console.log(`Supabase Strong: ${allSets.length} séries chargées pour ${rawWorkouts.length} séances.`);
 
-              strongWoData = rawWorkouts.map(w => ({
+              const fetchedWorkouts: StrongWorkout[] = rawWorkouts.map(w => ({
                 id: w.id,
                 date: w.date ? String(w.date).split('T')[0] : new Date().toISOString().split('T')[0],
                 name: w.name || "Entraînement de musculation",
@@ -637,16 +692,51 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   set_order: Number(s.set_order) || 1
                 }))
               }));
+
+              // E. Fusion intelligente avec le cache local existant (Delta Sync)
+              if (isFreshClient) {
+                strongWoData = fetchedWorkouts;
+              } else {
+                const workoutMap = new Map<string, StrongWorkout>();
+                // 1. Charger les séances du cache local existant
+                localWorkouts.forEach(w => workoutMap.set(w.id, w));
+                // 2. Mettre à jour / ajouter les séances fraîchement reçues du Cloud
+                fetchedWorkouts.forEach(w => workoutMap.set(w.id, w));
+                strongWoData = Array.from(workoutMap.values()).sort((a, b) => b.date.localeCompare(a.date));
+
+                // 3. Si des séances ont été supprimées depuis un autre appareil (cloudCount < localCount)
+                if (totalCloudCount > 0 && totalCloudCount < localWorkouts.length) {
+                  try {
+                    const allCloudIds = new Set<string>();
+                    let idFrom = 0;
+                    while (idFrom < totalCloudCount) {
+                      const idTo = idFrom + 999;
+                      const { data: idPage } = await supabase
+                        .from('strong_workouts')
+                        .select('id')
+                        .or(`user_id.eq.${userId},user_id.is.null`)
+                        .range(idFrom, idTo);
+                      if (!idPage || idPage.length === 0) break;
+                      idPage.forEach(row => allCloudIds.add(row.id));
+                      if (idPage.length < 1000) break;
+                      idFrom += 1000;
+                    }
+                    if (allCloudIds.size > 0) {
+                      strongWoData = strongWoData.filter(w => allCloudIds.has(w.id));
+                    }
+                  } catch (delErr) {
+                    console.warn("Erreur réconciliation des suppressions Cloud:", delErr);
+                  }
+                }
+              }
             }
 
             if (strongWoData.length === 0 && localWorkouts.length > 0) {
               console.log("Aucune séance trouvée sur Supabase, conservation du cache local.");
               setStrongWorkouts(localWorkouts);
-            } else {
+            } else if (strongWoData.length > 0) {
               setStrongWorkouts(strongWoData);
-              if (strongWoData.length > 0) {
-                syncStrongToLocalStorage(strongExData, strongWoData);
-              }
+              syncStrongToLocalStorage(strongExData, strongWoData);
             }
           } catch (woGlobalErr) {
             console.error("Erreur globale lors du chargement des séances Strong:", woGlobalErr);
@@ -675,6 +765,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setLoading(false);
       isPerformingLoadRef.current = false;
+      lastSyncTimeRef.current = Date.now();
     }
   };
 
