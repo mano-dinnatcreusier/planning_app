@@ -12,10 +12,24 @@ import { GoalFormModal } from './components/GoalFormModal';
 import { LoginModal } from './components/LoginModal';
 import type { FinalGoal, Milestone } from './types';
 
+const LAST_TAB_KEY = 'fg_last_tab';
+const MAIN_TABS: MainTabType[] = ['daily', 'tracking', 'strong', 'goals'];
+
 // Core component wrapped in provider
 const MainApp: React.FC = () => {
   const { user, loading } = useGoals();
-  const [activeTab, setActiveTab] = useState<MainTabType>('daily');
+  // Rouvre l'app sur le dernier onglet touché (l'ordre des onglets ne change pas).
+  const [activeTab, setActiveTabState] = useState<MainTabType>(() => {
+    try {
+      const saved = localStorage.getItem(LAST_TAB_KEY);
+      if (saved && (MAIN_TABS as string[]).includes(saved)) return saved as MainTabType;
+    } catch { /* localStorage indisponible */ }
+    return 'daily';
+  });
+  const setActiveTab = (tab: MainTabType) => {
+    setActiveTabState(tab);
+    try { localStorage.setItem(LAST_TAB_KEY, tab); } catch { /* ignore */ }
+  };
   const [goalsSubTab, setGoalsSubTab] = useState<'dashboard' | 'timeline' | 'calendar'>('dashboard');
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   
