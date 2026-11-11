@@ -167,7 +167,9 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let debounceTimer: any = null;
     const channel = supabase
       .channel('app-realtime-sync')
-      .on('postgres_changes', { event: '*', schema: 'public' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public' }, (payload: { table?: string }) => {
+        // Les tâches du jour ont leur propre synchro (DailyTasksCard) : inutile de tout recharger
+        if (payload.table?.startsWith('daily_task')) return;
         if (isPerformingLoadRef.current) return;
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {

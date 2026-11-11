@@ -13,7 +13,7 @@ Exemples :
   planning tasks list [--date hier|demain|2026-11-12] [--json]    # tâches du jour + de la semaine
   planning tasks done 3                  # 3 = numéro dans la liste du jour, S2 = 2e tâche de la semaine
   planning goals list
-  planning metrics                       # report des tâches + ~/.local/state/vigie/metrics/journee.json
+  planning metrics                       # report des tâches + carte Vigie ~/.local/state/vigie/metrics/planning.json
 """
 from __future__ import annotations
 
@@ -38,7 +38,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 CONFIG = Path(os.environ.get("PLANNING_CONFIG", Path.home() / ".config/vigie/planning.json"))
-METRICS = Path(os.environ.get("PLANNING_METRICS", Path.home() / ".local/state/vigie/metrics/journee.json"))
+# Carte épinglée Planning App en haut de Vigie (contrat : vigie/docs/metriques.md, « Carte épinglée »)
+METRICS = Path(os.environ.get("PLANNING_METRICS", Path.home() / ".local/state/vigie/metrics/planning.json"))
+WEEKS = 16  # semaines d'historique des séries
 APP_URL = "https://mano-dinnatcreusier.github.io/planning_app/"
 EMAIL_DOMAIN = "planning.app"  # même règle que l'app : un identifiant sans @ devient <id>@planning.app
 LOGIN_PORT = 8766
@@ -249,36 +251,105 @@ def resolve_goal(ref: str, cache: list[dict]) -> dict:
     return hits[0]
 
 
-# ---------------------------------------------------------------- métrique Vigie
+# ---------------------------------------------------------------- carte Vigie (planning.json)
 
-def write_metrics(value: str, tone: str = "neutral", detail: str = "", extra: list | None = None) -> None:
+def write_card(metrics: list[dict], series: list[dict]) -> None:
     METRICS.parent.mkdir(parents=True, exist_ok=True)
-    doc = {"updated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-           "metrics": [{"label": "Tâches du jour", "value": value, "tone": tone, "detail": detail}] + (extra or [])}
+    doc = {"updated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "metrics": metrics[:3]}
+    if series:  # sans séries, Vigie affiche son exemple : on n'écrit pas de série vide
+        doc["series"] = series
     tmp = METRICS.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=1))
     os.replace(tmp, METRICS)
 
 
-def refresh_metrics() -> dict:
+def task_metrics() -> list[dict]:
     day, week = tasks_for(today(), "day"), tasks_for(today(), "week")
     dd, wd = sum(t["is_done"] for t in day), sum(t["is_done"] for t in week)
-    carried = sum(1 for t in day + week if t["postponed_count"] > 0)
     tone = lambda done, lst: "good" if lst and done == len(lst) else "neutral"
-    detail = f"{dd} faite(s) sur {len(day)} aujourd'hui" + (f" ; {carried} tâche(s) reportée(s) en cours" if carried else "")
-    extra = [{"label": "Semaine", "value": f"{wd}/{len(week)}", "tone": tone(wd, week),
-              "detail": f"tâches de la semaine du {monday(today()).strftime('%d/%m')} : {wd} faite(s) sur {len(week)}"}]
-    if carried:
-        extra.append({"label": "Reportées", "value": str(carried), "tone": "bad" if carried >= 3 else "neutral",
-                      "detail": "tâches en cours venues d'un jour ou d'une semaine précédente"})
-    write_metrics(f"{dd}/{len(day)}", tone(dd, day), detail, extra)
-    return {"day": [dd, len(day)], "week": [wd, len(week)], "carried": carried}
+    carried = lambda lst: sum(1 for t in lst if t["postponed_count"] > 0 and not t["is_done"])
+    m = monday(today())
+    return [
+        {"label": "Tâches du jour", "value": f"{dd}/{len(day)}", "tone": tone(dd, day),
+         "detail": f"{dd} faite(s) sur {len(day)} aujourd'hui" + (f", {carried(day)} reportée(s) d'un jour précédent" if carried(day) else "")},
+        {"label": "Tâches de la semaine", "value": f"{wd}/{len(week)}", "tone": tone(wd, week),
+         "detail": f"semaine du {m.strftime('%d/%m')} au {(m + dt.timedelta(days=6)).strftime('%d/%m')}"
+                   + (f", {carried(week)} reportée(s) d'une semaine précédente" if carried(week) else "")},
+    ]
+
+
+def strong_series() -> list[dict]:
+    """Séances et séries Strong par semaine (WEEKS dernières semaines) + séries sur 7 jours glissants.
+    Une série compte si elle a au moins 1 rep (les lignes « Rest Timer » de l'import Strong sont à 0)."""
+    t = today()
+    first_week = monday(t) - dt.timedelta(weeks=WEEKS - 1)
+    since = first_week - dt.timedelta(days=6)  # pour la moyenne glissante du premier jour
+    workouts = rest("GET", "strong_workouts", {"select": "id,date", "date": f"gte.{since.isoformat()}", "order": "date.asc"})
+    day_of = {}
+    for w in workouts:
+        try:
+            day_of[w["id"]] = dt.date.fromisoformat(str(w["date"])[:10])
+        except ValueError:
+            continue
+    sets_per_day: dict[dt.date, int] = {}
+    ids = list(day_of)
+    for i in range(0, len(ids), 30):  # ~30 séances par requête : reste sous la limite de 1000 lignes
+        chunk = ids[i:i + 30]
+        rows = rest("GET", "strong_workout_sets", {"select": "workout_id", "workout_id": f"in.({','.join(chunk)})",
+                                                   "reps": "gt.0", "limit": "5000"})
+        for r in rows:
+            d = day_of[r["workout_id"]]
+            sets_per_day[d] = sets_per_day.get(d, 0) + 1
+    weeks = [first_week + dt.timedelta(weeks=k) for k in range(WEEKS)]
+    sessions_w = {wk: 0 for wk in weeks}
+    sets_w = {wk: 0 for wk in weeks}
+    for wid, d in day_of.items():
+        if monday(d) in sessions_w:
+            sessions_w[monday(d)] += 1
+    for d, n in sets_per_day.items():
+        if monday(d) in sets_w:
+            sets_w[monday(d)] += n
+    rolling = []
+    day = first_week
+    while day <= t:
+        rolling.append([day.isoformat(), float(sum(sets_per_day.get(day - dt.timedelta(days=k), 0) for k in range(7)))])
+        day += dt.timedelta(days=1)
+    return [
+        {"label": "Séances Strong", "unit": "", "value": sessions_w[monday(t)], "value_label": "cette semaine",
+         "weeks": [[wk.isoformat(), sessions_w[wk]] for wk in weeks]},
+        {"label": "Séries Strong", "unit": "", "value": int(rolling[-1][1]) if rolling else 0, "value_label": "7 derniers jours",
+         "weeks": [[wk.isoformat(), sets_w[wk]] for wk in weeks], "rolling7": rolling},
+    ]
+
+
+def refresh_card() -> dict:
+    """Écrit planning.json. Les tâches et Strong sont indépendants : l'un peut manquer sans bloquer l'autre."""
+    errors = []
+    try:
+        metrics = task_metrics()
+    except MissingTables:
+        metrics = [{"label": "Tâches du jour", "value": "—", "tone": "neutral",
+                    "detail": "migration Supabase des tâches du jour en attente"}]
+    except PlanningError as e:
+        metrics, _ = [], errors.append(e)
+    try:
+        series = strong_series()
+    except PlanningError as e:
+        series, _ = [], errors.append(e)
+    if errors and not metrics and not series:
+        write_card([{"label": "Planning", "value": "—", "tone": "neutral", "detail": f"accès Supabase à refaire : {errors[0]}"[:200]}], [])
+        raise errors[0]
+    write_card(metrics, series)
+    return {"metrics": metrics, "series": series}
 
 
 def after_change() -> None:
     try:
         rollover()
-        refresh_metrics()
+    except PlanningError:
+        pass
+    try:
+        refresh_card()
     except PlanningError:
         pass
 
@@ -422,17 +493,16 @@ def cmd_goals_list(a):
 
 
 def cmd_metrics(a):
+    n = 0
     try:
         n = rollover()
-        m = refresh_metrics()
     except MissingTables:
-        write_metrics("—", detail="migration Supabase des tâches du jour en attente")
-        raise
-    except PlanningError as e:
-        write_metrics("—", detail=f"accès Supabase à refaire : {e}"[:200])
-        raise
+        pass
+    card = refresh_card()
     if not a.quiet:
-        print(f"Jour {m['day'][0]}/{m['day'][1]} · Semaine {m['week'][0]}/{m['week'][1]} ({n} reportée(s) ce passage) → {METRICS}")
+        pills = " · ".join(f"{m['label']} {m['value']}" for m in card["metrics"])
+        ser = " · ".join(f"{x['label']} {x['value']} ({x['value_label']})" for x in card["series"])
+        print(f"{pills}\n{ser}\n({n} tâche(s) reportée(s) ce passage) → {METRICS}")
 
 
 def cmd_status(a):
@@ -635,7 +705,7 @@ def main(argv=None) -> int:
     x = g.add_parser("list", help="objectifs en cours (pour proposer les bons)")
     x.add_argument("--all", action="store_true"); x.add_argument("--json", action="store_true"); x.set_defaults(fn=cmd_goals_list)
 
-    m = sub.add_parser("metrics", help="reporter les tâches non faites et écrire la métrique Vigie")
+    m = sub.add_parser("metrics", help="reporter les tâches non faites et écrire la carte Vigie (planning.json)")
     m.add_argument("--quiet", action="store_true"); m.set_defaults(fn=cmd_metrics)
 
     a = p.parse_args(argv)
