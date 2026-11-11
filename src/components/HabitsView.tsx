@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useGoals } from '../context/GoalContext';
+import { DailyTasksCard } from './DailyTasksCard';
 import { suggestHabitViaAi } from '../utils/aiClient';
 import type { HabitSuggestionResult } from '../utils/aiClient';
 import { 
@@ -332,6 +333,9 @@ export const HabitsView: React.FC = () => {
       {/* VIEW 1: TODAY FAST CHECK-IN */}
       {activeSubTab === 'today' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Tâches du jour et de la semaine (« Journée ») */}
+          <DailyTasksCard />
+
           {/* Today's Progress Banner */}
           <div 
             className="glass" 
