@@ -1,0 +1,8 @@
+[Unit]
+Description=Planning App : report des tâches et carte Vigie (planning.json)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/planning metrics --quiet
+MemoryMax=150M
+Nice=10

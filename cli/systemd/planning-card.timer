@@ -1,0 +1,10 @@
+[Unit]
+Description=Met à jour la carte Planning App de Vigie toutes les 15 min
+
+[Timer]
+OnBootSec=2min
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
