@@ -50,7 +50,7 @@ interface GoalContextType {
   strongWorkouts: StrongWorkout[];
   addStrongExercise: (name: string) => Promise<string>;
   deleteStrongExercise: (id: string) => Promise<void>;
-  addStrongWorkout: (workout: Omit<StrongWorkout, 'id'>) => Promise<string>;
+  addStrongWorkout: (workout: Omit<StrongWorkout, 'id'>) => Promise<{ id: string; rpeDropped: boolean }>;
   deleteStrongWorkout: (id: string) => Promise<void>;
   importStrongCSVData: (csvContent: string) => Promise<{ workoutsCount: number; exercisesCount: number; savedToCloud: boolean }>;
   // Config & Demo Data
@@ -689,7 +689,8 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   exercise_name: s.exercise_name || "Exercice",
                   weight: Number(s.weight) || 0,
                   reps: Number(s.reps) || 0,
-                  set_order: Number(s.set_order) || 1
+                  set_order: Number(s.set_order) || 1,
+                  ...(s.rpe != null ? { rpe: Number(s.rpe) } : {})
                 }))
               }));
 
@@ -1801,7 +1802,10 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
     syncStrongToLocalStorage(nextExercises, strongWorkouts);
   };
 
-  const addStrongWorkout = async (workout: Omit<StrongWorkout, 'id'>) => {
+  // Enregistre une séance. En mode connecté, lève une erreur si le Cloud refuse : le formulaire
+  // reste rempli pour réessayer (sinon la séance, seulement locale, serait effacée par la
+  // réconciliation suivante). rpeDropped = la colonne rpe n'existe pas encore côté Supabase.
+  const addStrongWorkout = async (workout: Omit<StrongWorkout, 'id'>): Promise<{ id: string; rpeDropped: boolean }> => {
     const newWorkout: StrongWorkout = {
       id: crypto.randomUUID(),
       date: workout.date || new Date().toISOString().split('T')[0],
@@ -1810,39 +1814,46 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       created_at: new Date().toISOString(),
       user_id: user?.id
     };
+    let rpeDropped = false;
 
     const supabase = getSupabase();
     if (supabase && user) {
-      try {
-        const { error: woErr } = await supabase.from('strong_workouts').insert({
-          id: newWorkout.id,
-          date: newWorkout.date,
-          name: newWorkout.name,
-          user_id: user.id,
-          created_at: newWorkout.created_at
-        });
-        if (woErr) throw woErr;
+      const { error: woErr } = await supabase.from('strong_workouts').insert({
+        id: newWorkout.id,
+        date: newWorkout.date,
+        name: newWorkout.name,
+        user_id: user.id,
+        created_at: newWorkout.created_at
+      });
+      if (woErr) throw new Error(`Séance non enregistrée dans le Cloud : ${woErr.message}`);
 
-        const setsToInsert = newWorkout.sets.map(s => ({
-          workout_id: newWorkout.id,
-          exercise_name: s.exercise_name,
-          set_order: s.set_order,
-          weight: s.weight,
-          reps: s.reps,
-          created_at: newWorkout.created_at
-        }));
-
-        const { error: setsErr } = await supabase.from('strong_workout_sets').insert(setsToInsert);
-        if (setsErr) throw setsErr;
-      } catch (err) {
-        console.warn("Failed to insert workout in Supabase. Falling back to local state.", err);
+      const rows = (withRpe: boolean) => newWorkout.sets.map(s => ({
+        workout_id: newWorkout.id,
+        exercise_name: s.exercise_name,
+        set_order: s.set_order,
+        weight: s.weight,
+        reps: s.reps,
+        created_at: newWorkout.created_at,
+        ...(withRpe && s.rpe != null ? { rpe: s.rpe } : {})
+      }));
+      const hasRpe = newWorkout.sets.some(s => s.rpe != null);
+      let { error: setsErr } = await supabase.from('strong_workout_sets').insert(rows(hasRpe));
+      if (setsErr && hasRpe && /rpe/i.test(setsErr.message || '')) {
+        // Migration pas encore appliquée : on garde la séance, sans les notes d'effort.
+        rpeDropped = true;
+        ({ error: setsErr } = await supabase.from('strong_workout_sets').insert(rows(false)));
       }
+      if (setsErr) {
+        await supabase.from('strong_workouts').delete().eq('id', newWorkout.id);
+        throw new Error(`Séries non enregistrées dans le Cloud : ${setsErr.message}`);
+      }
+      if (rpeDropped) newWorkout.sets = newWorkout.sets.map(({ rpe: _rpe, ...s }) => s);
     }
 
     const nextWorkouts = [newWorkout, ...strongWorkouts];
     setStrongWorkouts(nextWorkouts);
     syncStrongToLocalStorage(strongExercises, nextWorkouts);
-    return newWorkout.id;
+    return { id: newWorkout.id, rpeDropped };
   };
 
   const deleteStrongWorkout = async (id: string) => {

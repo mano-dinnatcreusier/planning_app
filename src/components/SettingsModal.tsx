@@ -101,6 +101,8 @@ ALTER TABLE public.milestones ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'me
 ALTER TABLE public.final_goals ADD COLUMN IF NOT EXISTS user_id UUID;
 ALTER TABLE public.habits ADD COLUMN IF NOT EXISTS user_id UUID;
 
+-- Note d'effort facultative par série Strong (0 à 10)
+ALTER TABLE public.strong_workout_sets ADD COLUMN IF NOT EXISTS rpe NUMERIC(3,1) CHECK (rpe >= 0 AND rpe <= 10);
 -- Créer la table des profils utilisateurs
 CREATE TABLE IF NOT EXISTS public.user_profiles (
     user_id UUID PRIMARY KEY,
@@ -236,6 +238,7 @@ CREATE TABLE IF NOT EXISTS public.strong_workout_sets (
     set_order INTEGER NOT NULL,
     weight NUMERIC NOT NULL,
     reps INTEGER NOT NULL,
+    rpe NUMERIC(3,1) CHECK (rpe >= 0 AND rpe <= 10),
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -907,6 +910,7 @@ CREATE TABLE IF NOT EXISTS strong_workout_sets (
     set_order INTEGER NOT NULL,
     weight NUMERIC NOT NULL,
     reps INTEGER NOT NULL,
+    rpe NUMERIC(3,1) CHECK (rpe >= 0 AND rpe <= 10),
     created_at TIMESTAMPTZ DEFAULT now()
 );
 

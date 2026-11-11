@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useGoals } from '../context/GoalContext';
 import { 
   Dumbbell, 
@@ -18,6 +18,18 @@ import {
   Activity
 } from 'lucide-react';
 import type { StrongWorkoutSet } from '../types';
+import { exerciseUsageScores, sortByUsage, detectNewPRs, localToday } from '../utils/strongStats';
+import type { NewPR } from '../utils/strongStats';
+
+// Une série du formulaire. rpeTouched : la note d'effort n'est enregistrée que si Mano l'a touchée.
+type FormSet = { weight: string; reps: string; rpe: string; rpeTouched: boolean };
+type FormExercise = { exerciseName: string; sets: FormSet[] };
+const DEFAULT_RPE = '7';
+const newSet = (weight = '0', reps = '10'): FormSet => ({ weight, reps, rpe: DEFAULT_RPE, rpeTouched: false });
+const DRAFT_KEY = 'fg_strong_draft';
+const readDraft = (): { date?: string; name?: string; exercises?: FormExercise[] } => {
+  try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}') || {}; } catch { return {}; }
+};
 
 export const StrongView: React.FC = () => {
   const { 
@@ -49,9 +61,18 @@ export const StrongView: React.FC = () => {
   const [pageSize, setPageSize] = useState(20);
 
   // New Workout Form state
-  const [workoutDate, setWorkoutDate] = useState(new Date().toISOString().split('T')[0]);
-  const [workoutName, setWorkoutName] = useState('Entraînement de musculation');
-  const [selectedExercises, setSelectedExercises] = useState<{ exerciseName: string; sets: { weight: string; reps: string }[] }[]>([]);
+  // Le formulaire est gardé en brouillon local : une séance en cours survit à un rechargement.
+  const [workoutDate, setWorkoutDate] = useState(() => readDraft().date || localToday());
+  const [workoutName, setWorkoutName] = useState(() => readDraft().name || 'Entraînement de musculation');
+  const [selectedExercises, setSelectedExercises] = useState<FormExercise[]>(() => readDraft().exercises || []);
+  const [newPRs, setNewPRs] = useState<NewPR[] | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  useEffect(() => {
+    try {
+      if (selectedExercises.length === 0) localStorage.removeItem(DRAFT_KEY);
+      else localStorage.setItem(DRAFT_KEY, JSON.stringify({ date: workoutDate, name: workoutName, exercises: selectedExercises }));
+    } catch { /* localStorage indisponible */ }
+  }, [workoutDate, workoutName, selectedExercises]);
   const [formErrorMsg, setFormErrorMsg] = useState('');
   const [formSuccessMsg, setFormSuccessMsg] = useState('');
 
@@ -147,6 +168,8 @@ export const StrongView: React.FC = () => {
     return weekKeys.map(k => weeksMap.get(k)!);
   }, [strongWorkouts]);
 
+  const usageScores = useMemo(() => exerciseUsageScores(strongWorkouts), [strongWorkouts]);
+
   // Exercise options list
   const exerciseOptions = useMemo(() => {
     const names = new Set<string>();
@@ -158,8 +181,14 @@ export const StrongView: React.FC = () => {
     strongExercises.forEach(e => {
       if (e.name) names.add(e.name.trim());
     });
-    return Array.from(names).sort((a, b) => a.localeCompare(b));
-  }, [strongWorkouts, strongExercises]);
+    return sortByUsage(Array.from(names), n => n, usageScores);
+  }, [strongWorkouts, strongExercises, usageScores]);
+
+  // Catalogue trié par usage fréquent et récent (demi-vie 21 jours), pour choisir un exercice.
+  const exercisesByUsage = useMemo(
+    () => sortByUsage(strongExercises, e => e.name, usageScores),
+    [strongExercises, usageScores]
+  );
 
   // Exercise progression & estimated 1RM
   const exerciseProgressionData = useMemo(() => {
@@ -242,10 +271,7 @@ export const StrongView: React.FC = () => {
   // Add a new exercise row to the current workout form
   const addExerciseToForm = (eName: string) => {
     if (!eName) return;
-    setSelectedExercises(prev => [...prev, {
-      exerciseName: eName,
-      sets: [{ weight: '0', reps: '10' }]
-    }]);
+    setSelectedExercises(prev => [...prev, { exerciseName: eName, sets: [newSet()] }]);
   };
 
   // Remove exercise from the form
@@ -253,35 +279,28 @@ export const StrongView: React.FC = () => {
     setSelectedExercises(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Add set to an exercise in the form
+  // Add set: duplique poids et reps de la dernière série (la note d'effort repart non saisie)
   const addSetToExercise = (exIndex: number) => {
-    setSelectedExercises(prev => {
-      const next = [...prev];
-      const targetEx = next[exIndex];
-      const lastSet = targetEx.sets[targetEx.sets.length - 1] || { weight: '0', reps: '10' };
-      targetEx.sets.push({ ...lastSet }); // Duplicate last set for convenience
-      return next;
-    });
+    setSelectedExercises(prev => prev.map((ex, i) => {
+      if (i !== exIndex) return ex;
+      const last = ex.sets[ex.sets.length - 1];
+      return { ...ex, sets: [...ex.sets, last ? newSet(last.weight, last.reps) : newSet()] };
+    }));
   };
 
   // Remove set from an exercise in the form
   const removeSetFromExercise = (exIndex: number, setIndex: number) => {
-    setSelectedExercises(prev => {
-      const next = [...prev];
-      const targetEx = next[exIndex];
-      targetEx.sets = targetEx.sets.filter((_, i) => i !== setIndex);
-      return next;
-    });
+    setSelectedExercises(prev => prev.map((ex, i) =>
+      i === exIndex ? { ...ex, sets: ex.sets.filter((_, j) => j !== setIndex) } : ex));
   };
 
-  // Handle set values change
-  const handleSetChange = (exIndex: number, setIndex: number, field: 'weight' | 'reps', val: string) => {
-    setSelectedExercises(prev => {
-      const next = [...prev];
-      next[exIndex].sets[setIndex][field] = val;
-      return next;
-    });
+  // Handle set values change (toucher la note d'effort la rend « saisie »)
+  const updateSet = (exIndex: number, setIndex: number, patch: Partial<FormSet>) => {
+    setSelectedExercises(prev => prev.map((ex, i) =>
+      i === exIndex ? { ...ex, sets: ex.sets.map((st, j) => (j === setIndex ? { ...st, ...patch } : st)) } : ex));
   };
+  const handleSetChange = (exIndex: number, setIndex: number, field: 'weight' | 'reps', val: string) =>
+    updateSet(exIndex, setIndex, { [field]: val });
 
   // Handle New Workout Submission
   const handleWorkoutSubmit = async (e: React.FormEvent) => {
@@ -294,35 +313,46 @@ export const StrongView: React.FC = () => {
       return;
     }
 
-    // Prepare sets
+    // Prepare sets (la note d'effort n'est incluse que si elle a été touchée et vaut 0 à 10)
     const setsToLog: StrongWorkoutSet[] = [];
     selectedExercises.forEach(ex => {
       ex.sets.forEach((set, sIdx) => {
+        const rpe = parseFloat(set.rpe.replace(',', '.'));
         setsToLog.push({
           exercise_name: ex.exerciseName,
           weight: parseFloat(set.weight) || 0,
           reps: parseInt(set.reps, 10) || 0,
-          set_order: sIdx + 1
+          set_order: sIdx + 1,
+          ...(set.rpeTouched && set.rpe.trim() !== '' && rpe >= 0 && rpe <= 10 ? { rpe } : {})
         });
       });
     });
 
+    // PR calculés avant l'ajout, contre tout l'historique existant
+    const prs = detectNewPRs(strongWorkouts, setsToLog);
+
+    setIsSaving(true);
     try {
-      await addStrongWorkout({
+      const { rpeDropped } = await addStrongWorkout({
         date: workoutDate,
         name: workoutName.trim() || "Entraînement de musculation",
         sets: setsToLog
       });
 
-      setFormSuccessMsg('Séance enregistrée avec succès !');
-      // Reset form
-      setWorkoutDate(new Date().toISOString().split('T')[0]);
+      setFormSuccessMsg(rpeDropped
+        ? "Séance enregistrée, mais sans les notes d'effort : la colonne rpe manque dans Supabase (migration à appliquer)."
+        : 'Séance enregistrée avec succès !');
+      // Reset form (le brouillon est effacé avec)
+      setWorkoutDate(localToday());
       setWorkoutName('Entraînement de musculation');
       setSelectedExercises([]);
-      setTimeout(() => setFormSuccessMsg(''), 4000);
+      setTimeout(() => setFormSuccessMsg(''), rpeDropped ? 12000 : 4000);
+      setNewPRs(prs);
       setActiveSubTab('history');
     } catch (err: any) {
-      setFormErrorMsg(err.message || "Erreur lors de l'enregistrement de la séance.");
+      setFormErrorMsg((err.message || "Erreur lors de l'enregistrement de la séance.") + ' Le formulaire est conservé : réessaie quand le réseau revient.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -422,6 +452,7 @@ CREATE TABLE IF NOT EXISTS public.strong_workout_sets (
     set_order INTEGER NOT NULL,
     weight NUMERIC(6,2) NOT NULL DEFAULT 0,
     reps INTEGER NOT NULL DEFAULT 0,
+    rpe NUMERIC(3,1) CHECK (rpe >= 0 AND rpe <= 10),
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -507,7 +538,7 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
         
         .sets-grid-header {
           display: grid;
-          grid-template-columns: 80px 1fr 1fr 50px;
+          grid-template-columns: 56px 1fr 1fr 64px 40px;
           gap: 12px;
           font-size: 0.72rem;
           color: var(--text-low);
@@ -517,7 +548,7 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
         }
         .sets-grid-row {
           display: grid;
-          grid-template-columns: 80px 1fr 1fr 50px;
+          grid-template-columns: 56px 1fr 1fr 64px 40px;
           gap: 12px;
           align-items: center;
           margin-bottom: 6px;
@@ -561,7 +592,7 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
             gap: 8px !important;
           }
           .sets-grid-header, .sets-grid-row {
-            grid-template-columns: 60px 1fr 1fr 36px !important;
+            grid-template-columns: 30px 1fr 1fr 52px 28px !important;
             gap: 6px !important;
           }
           .sets-grid-header {
@@ -679,6 +710,39 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
       {/* Render View Based on sub-tab */}
       {activeSubTab === 'history' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+          {/* Retour d'enregistrement : message + nouveaux PR de la séance */}
+          {(formSuccessMsg || newPRs) && (
+            <div className="glass" style={{ borderRadius: 'var(--border-radius-lg)', padding: '16px 18px', border: '1px solid rgba(234, 179, 8, 0.25)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.85rem', color: '#a7f3d0', fontWeight: 600 }}>
+                  {formSuccessMsg ? `✔️ ${formSuccessMsg}` : '✔️ Séance enregistrée'}
+                </span>
+                <button type="button" onClick={() => { setNewPRs(null); setFormSuccessMsg(''); }} aria-label="Fermer"
+                  style={{ background: 'none', border: 'none', color: 'var(--text-low)', cursor: 'pointer', fontSize: '1rem' }}>×</button>
+              </div>
+              {newPRs && newPRs.length > 0 ? (
+                <>
+                  <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#eab308', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Trophy size={16} /> {newPRs.length} nouveau{newPRs.length > 1 ? 'x' : ''} PR
+                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {newPRs.map(pr => (
+                      <div key={`${pr.exercise}|${pr.weight}`} style={{ fontSize: '0.82rem', color: 'var(--text-med)', display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'baseline' }}>
+                        <span style={{ color: '#ffffff', fontWeight: 700 }}>{pr.exercise}</span>
+                        <span className="pr-pill">{pr.weight} kg × {pr.reps}</span>
+                        <span style={{ color: 'var(--text-low)', fontSize: '0.75rem' }}>
+                          {pr.previousReps > 0 ? `avant : ${pr.previousReps} reps à ce poids` : 'premier passage à ce poids'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : newPRs ? (
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-low)' }}>Pas de nouveau PR cette fois.</span>
+              ) : null}
+            </div>
+          )}
           
           {/* History control row */}
           <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -874,6 +938,9 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
                                   <span>{set.weight} kg</span>
                                   <span style={{ color: 'var(--text-low)' }}>x</span>
                                   <span style={{ color: '#ffffff', fontWeight: 700 }}>{set.reps} reps</span>
+                                  {set.rpe != null && (
+                                    <span style={{ color: 'var(--text-low)' }} title="Note d'effort">· effort {set.rpe}</span>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -1027,7 +1094,8 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
                           <div className="sets-grid-header">
                             <span>Série</span>
                             <span>Poids (kg)</span>
-                            <span>Répétitions</span>
+                            <span>Reps</span>
+                            <span title="Note d'effort de 0 à 10, facultative">Effort</span>
                             <span></span>
                           </div>
 
@@ -1065,6 +1133,31 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
                                   padding: '6px 8px',
                                   fontSize: '0.8rem',
                                   color: '#ffffff',
+                                  width: '100%',
+                                  outline: 'none'
+                                }}
+                              />
+
+                              {/* Note d'effort : affiche 7, mais n'est enregistrée que si on la touche */}
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                min={0}
+                                max={10}
+                                step={0.5}
+                                aria-label={`Effort série ${sIdx + 1} (0 à 10, facultatif)`}
+                                title={set.rpeTouched ? "Note d'effort enregistrée" : "Non enregistrée tant que tu ne la touches pas"}
+                                value={set.rpe}
+                                onFocus={() => { if (!set.rpeTouched) updateSet(exIdx, sIdx, { rpeTouched: true }); }}
+                                onChange={(e) => updateSet(exIdx, sIdx, { rpe: e.target.value, rpeTouched: true })}
+                                style={{
+                                  backgroundColor: set.rpeTouched ? 'rgba(255, 255, 255, 0.02)' : 'transparent',
+                                  border: set.rpeTouched ? '1px solid var(--border-color)' : '1px dashed var(--border-color)',
+                                  borderRadius: 'var(--border-radius-sm)',
+                                  padding: '6px 8px',
+                                  fontSize: '0.8rem',
+                                  color: set.rpeTouched ? '#ffffff' : 'var(--text-low)',
+                                  fontStyle: set.rpeTouched ? 'normal' : 'italic',
                                   width: '100%',
                                   outline: 'none'
                                 }}
@@ -1131,7 +1224,9 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
                 {/* Submit button */}
                 <button
                   type="submit"
+                  disabled={isSaving}
                   style={{
+                    opacity: isSaving ? 0.6 : 1,
                     backgroundColor: 'var(--accent-primary)',
                     color: '#ffffff',
                     border: 'none',
@@ -1152,7 +1247,7 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
                   onMouseOut={(e) => e.currentTarget.style.filter = 'none'}
                 >
                   <Plus size={16} />
-                  Enregistrer l'Entraînement
+                  {isSaving ? 'Enregistrement…' : "Enregistrer l'Entraînement"}
                 </button>
               </form>
 
@@ -1172,7 +1267,7 @@ CREATE INDEX IF NOT EXISTS idx_strong_workout_sets_workout ON public.strong_work
                 </p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '450px', overflowY: 'auto', paddingRight: '4px' }}>
-                  {strongExercises.map(ex => (
+                  {exercisesByUsage.map(ex => (
                     <button
                       key={ex.id}
                       type="button"

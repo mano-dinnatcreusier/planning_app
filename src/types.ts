@@ -110,6 +110,7 @@ export interface StrongWorkoutSet {
   weight: number;
   reps: number;
   set_order: number;
+  rpe?: number; // note d'effort 0-10, absente si non saisie
 }
 
 export interface StrongWorkout {
