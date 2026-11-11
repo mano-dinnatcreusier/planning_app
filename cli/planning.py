@@ -14,6 +14,7 @@ Exemples :
   planning tasks done 3                  # 3 = numéro dans la liste du jour, S2 = 2e tâche de la semaine
   planning goals list
   planning metrics                       # report des tâches + carte Vigie ~/.local/state/vigie/metrics/planning.json
+  planning strava connect                # une fois : relier Strava (lecture seule) pour les km de course
 """
 from __future__ import annotations
 
@@ -41,6 +42,10 @@ CONFIG = Path(os.environ.get("PLANNING_CONFIG", Path.home() / ".config/vigie/pla
 # Carte épinglée Planning App en haut de Vigie (contrat : vigie/docs/metriques.md, « Carte épinglée »)
 METRICS = Path(os.environ.get("PLANNING_METRICS", Path.home() / ".local/state/vigie/metrics/planning.json"))
 WEEKS = 16  # semaines d'historique des séries
+STRAVA_CONFIG = Path(os.environ.get("PLANNING_STRAVA_CONFIG", Path.home() / ".config/vigie/strava.json"))
+STRAVA_WEB = os.environ.get("PLANNING_STRAVA_WEB", "https://www.strava.com")         # autorisation et jetons
+STRAVA_API = os.environ.get("PLANNING_STRAVA_API", "https://www.strava.com/api/v3")  # données
+RUN_TYPES = {"Run", "TrailRun", "VirtualRun"}
 APP_URL = "https://mano-dinnatcreusier.github.io/planning_app/"
 EMAIL_DOMAIN = "planning.app"  # même règle que l'app : un identifiant sans @ devient <id>@planning.app
 LOGIN_PORT = 8766
@@ -322,6 +327,203 @@ def strong_series() -> list[dict]:
     ]
 
 
+# ---------------------------------------------------------------- Strava (km de course, lecture seule)
+
+def save_private(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f, indent=1)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+
+def strava_form(url: str, fields: dict):
+    data = urllib.parse.urlencode(fields).encode()
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=data, method="POST"), timeout=20) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read())
+        except ValueError:
+            return e.code, {}
+    except urllib.error.URLError as e:
+        raise PlanningError(f"Strava injoignable : {e.reason}")
+
+
+def strava_token() -> dict:
+    try:
+        cfg = json.loads(STRAVA_CONFIG.read_text())
+    except FileNotFoundError:
+        raise PlanningError("Strava pas encore relié : lancer `planning strava connect`")
+    if cfg.get("expires_at", 0) - 120 > time.time():
+        return cfg
+    with config_lock():
+        cfg = json.loads(STRAVA_CONFIG.read_text())
+        if cfg.get("expires_at", 0) - 120 > time.time():
+            return cfg
+        st, body = strava_form(f"{STRAVA_WEB}/oauth/token", {"client_id": cfg["client_id"], "client_secret": cfg["client_secret"],
+                                                            "grant_type": "refresh_token", "refresh_token": cfg["refresh_token"]})
+        if st != 200:
+            raise PlanningError(f"accès Strava refusé ({st}) : relancer `planning strava connect`")
+        cfg.update(access_token=body["access_token"], refresh_token=body["refresh_token"], expires_at=int(body["expires_at"]))
+        save_private(STRAVA_CONFIG, cfg)
+        return cfg
+
+
+def strava_runs(since: dt.date) -> list[dict]:
+    """Activités de course depuis `since` : [{"date": date locale, "km": float}]."""
+    cfg = strava_token()
+    after = int(dt.datetime.combine(since, dt.time()).timestamp())
+    runs, page = [], 1
+    while page <= 10:
+        url = f"{STRAVA_API}/athlete/activities?" + urllib.parse.urlencode({"after": after, "per_page": 200, "page": page})
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {cfg['access_token']}"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                acts = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            raise PlanningError(f"Strava {e.code} : " + ("limite de requêtes atteinte" if e.code == 429 else e.reason))
+        except urllib.error.URLError as e:
+            raise PlanningError(f"Strava injoignable : {e.reason}")
+        for a in acts:
+            if (a.get("sport_type") or a.get("type")) in RUN_TYPES:
+                runs.append({"date": dt.date.fromisoformat(a["start_date_local"][:10]), "km": (a.get("distance") or 0) / 1000})
+        if len(acts) < 200:
+            break
+        page += 1
+    return runs
+
+
+def run_series() -> dict | None:
+    """Km de course par semaine (Strava). None si Strava n'est pas relié : Vigie garde alors son exemple."""
+    if not STRAVA_CONFIG.exists():
+        return None
+    t = today()
+    first_week = monday(t) - dt.timedelta(weeks=WEEKS - 1)
+    km_day: dict[dt.date, float] = {}
+    for r in strava_runs(first_week - dt.timedelta(days=6)):
+        km_day[r["date"]] = km_day.get(r["date"], 0.0) + r["km"]
+    weeks = [first_week + dt.timedelta(weeks=k) for k in range(WEEKS)]
+    km_w = {wk: 0.0 for wk in weeks}
+    for d, km in km_day.items():
+        if monday(d) in km_w:
+            km_w[monday(d)] += km
+    rolling, day = [], first_week
+    while day <= t:
+        rolling.append([day.isoformat(), round(sum(km_day.get(day - dt.timedelta(days=k), 0.0) for k in range(7)), 1)])
+        day += dt.timedelta(days=1)
+    return {"label": "Course à pied", "unit": "km", "value": round(km_w[monday(t)], 1), "value_label": "cette semaine",
+            "weeks": [[wk.isoformat(), round(km_w[wk], 1)] for wk in weeks], "rolling7": rolling}
+
+
+STRAVA_PAGE = """<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Planning : relier Strava</title>
+<style>body{{font:16px system-ui;background:#0f1115;color:#e8e8ea;margin:0;padding:24px}}
+form,div.c{{max-width:420px;margin:auto;display:flex;flex-direction:column;gap:12px}}
+input,button{{font:inherit;padding:12px;border-radius:8px;border:1px solid #333;background:#1a1d24;color:inherit}}
+button{{background:#fc4c02;border:0;font-weight:600}}p,li{{color:#9aa0a6}}code{{color:#e8e8ea}}.err{{color:#f87171}}</style></head><body>
+<form method="post"><h2>Relier Strava (lecture seule)</h2>
+<p>1. Sur <a href="https://www.strava.com/settings/api" style="color:#fc4c02">strava.com/settings/api</a>, crée une application :</p>
+<ul><li>Nom : <code>Planning Mano</code> (au choix), catégorie : <code>Visualizer</code></li>
+<li>Site web : <code>{site}</code></li>
+<li>Authorization Callback Domain : <code>{domain}</code></li></ul>
+<p>2. Recopie ici son Client ID et son Client Secret (ils restent sur le mini-PC).</p>{msg}
+<input name="client_id" placeholder="Client ID" inputmode="numeric" required>
+<input name="client_secret" placeholder="Client Secret" autocomplete="off" required>
+<button>Continuer vers Strava</button>
+<p>3. Strava te demandera d'autoriser la lecture de tes activités : accepte.</p></form></body></html>"""
+
+
+def cmd_strava_connect(a):
+    host = a.host or tailscale_ip()
+    shown = a.public_host or tailscale_name() or host
+    path = secrets.token_urlsafe(12)
+    base = f"http://{shown}:{a.port}/{path}"
+    state = secrets.token_urlsafe(12)
+    pending: dict = {}
+    result: dict = {}
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def page(self, code, body, location=None):
+            self.send_response(code)
+            if location:
+                self.send_header("Location", location)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body.encode())
+
+        def form(self, msg=""):
+            return STRAVA_PAGE.format(site=html.escape(APP_URL), domain=html.escape(shown), msg=msg)
+
+        def do_GET(self):
+            u = urllib.parse.urlparse(self.path)
+            if u.path == f"/{path}":
+                return self.page(200, self.form())
+            if u.path != f"/{path}/callback" or not pending:
+                return self.page(404, "introuvable")
+            q = urllib.parse.parse_qs(u.query)
+            if q.get("state", [""])[0] != state:
+                return self.page(400, "requête inattendue")
+            if "error" in q or "code" not in q:
+                return self.page(200, self.form('<p class="err">Autorisation refusée sur Strava. Réessaie.</p>'))
+            scope = q.get("scope", [""])[0]
+            if "activity:read" not in scope:
+                return self.page(200, self.form('<p class="err">Il faut cocher la lecture des activités sur Strava.</p>'))
+            st, body = strava_form(f"{STRAVA_WEB}/oauth/token", {"client_id": pending["client_id"], "client_secret": pending["client_secret"],
+                                                                "code": q["code"][0], "grant_type": "authorization_code"})
+            if st != 200:
+                return self.page(200, self.form(f'<p class="err">Strava a refusé l\'échange ({st}). Vérifie le Client Secret.</p>'))
+            save_private(STRAVA_CONFIG, {"client_id": pending["client_id"], "client_secret": pending["client_secret"],
+                                         "access_token": body["access_token"], "refresh_token": body["refresh_token"],
+                                         "expires_at": int(body["expires_at"]), "scope": scope,
+                                         "athlete": (body.get("athlete") or {}).get("firstname", "")})
+            result["ok"] = True
+            self.page(200, "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+                           "<body style='font:18px system-ui;background:#0f1115;color:#a7f3d0;padding:24px'>"
+                           "✔ Strava relié (lecture seule). Tu peux fermer cette page.</body>")
+            threading.Thread(target=srv.shutdown, daemon=True).start()
+
+        def do_POST(self):
+            if self.path != f"/{path}":
+                return self.page(404, "introuvable")
+            n = int(self.headers.get("Content-Length", 0))
+            form = urllib.parse.parse_qs(self.rfile.read(min(n, 4096)).decode())
+            cid, secret = form.get("client_id", [""])[0].strip(), form.get("client_secret", [""])[0].strip()
+            if not cid.isdigit() or len(secret) < 20:
+                return self.page(200, self.form('<p class="err">Client ID (chiffres) ou Client Secret invalide.</p>'))
+            pending.update(client_id=cid, client_secret=secret)
+            auth = f"{STRAVA_WEB}/oauth/authorize?" + urllib.parse.urlencode({
+                "client_id": cid, "response_type": "code", "redirect_uri": f"{base}/callback",
+                "approval_prompt": "auto", "scope": "activity:read_all", "state": state})
+            self.page(303, "", location=auth)
+
+    srv = HTTPServer((host, a.port), H)
+    print(f"Ouvre sur ton téléphone (Tailscale) : {base}", flush=True)
+    print(f"(page valable {a.timeout // 60} min)", flush=True)
+    threading.Timer(a.timeout, srv.shutdown).start()
+    srv.serve_forever()
+    srv.server_close()
+    if not result:
+        raise PlanningError("délai dépassé, Strava pas relié")
+    print("Strava relié.")
+    after_change()
+
+
+def cmd_strava_status(a):
+    s = run_series()
+    if s is None:
+        print("Strava pas encore relié : `planning strava connect`")
+        return
+    print(f"Strava relié. Course à pied : {s['value']} km cette semaine ; 16 semaines : {[w[1] for w in s['weeks']]}")
+
+
 def refresh_card() -> dict:
     """Écrit planning.json. Les tâches et Strong sont indépendants : l'un peut manquer sans bloquer l'autre."""
     errors = []
@@ -336,6 +538,12 @@ def refresh_card() -> dict:
         series = strong_series()
     except PlanningError as e:
         series, _ = [], errors.append(e)
+    try:
+        runs = run_series()  # 3e série : km de course (Strava), absente tant que Strava n'est pas relié
+        if runs and series:
+            series.append(runs)
+    except PlanningError as e:
+        print(f"planning : {e}", file=sys.stderr)  # Strava en panne ne bloque pas le reste de la carte
     if errors and not metrics and not series:
         write_card([{"label": "Planning", "value": "—", "tone": "neutral", "detail": f"accès Supabase à refaire : {errors[0]}"[:200]}], [])
         raise errors[0]
@@ -707,6 +915,13 @@ def main(argv=None) -> int:
 
     m = sub.add_parser("metrics", help="reporter les tâches non faites et écrire la carte Vigie (planning.json)")
     m.add_argument("--quiet", action="store_true"); m.set_defaults(fn=cmd_metrics)
+
+    sv = sub.add_parser("strava", help="km de course depuis Strava (lecture seule)").add_subparsers(dest="sub", required=True)
+    x = sv.add_parser("connect", help="relier Strava une fois (page à ouvrir sur le téléphone)")
+    x.add_argument("--host"); x.add_argument("--public-host", default=os.environ.get("PLANNING_LOGIN_HOST"))
+    x.add_argument("--port", type=int, default=LOGIN_PORT); x.add_argument("--timeout", type=int, default=1200)
+    x.set_defaults(fn=cmd_strava_connect)
+    sv.add_parser("status", help="vérifier Strava et afficher les km par semaine").set_defaults(fn=cmd_strava_status)
 
     a = p.parse_args(argv)
     try:
