@@ -460,32 +460,20 @@ ALTER TABLE public.strong_exercises ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.strong_workouts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.strong_workout_sets ENABLE ROW LEVEL SECURITY;
 
--- Politiques de sécurité RLS robustes
+-- Politiques de sécurité RLS : chaque ligne n'est accessible qu'à son propriétaire connecté
 DROP POLICY IF EXISTS "Users can manage their own strong exercises" ON public.strong_exercises;
-CREATE POLICY "Users can manage their own strong exercises" 
-ON public.strong_exercises FOR ALL 
-USING (auth.uid() = user_id OR user_id IS NULL)
-WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
-
 DROP POLICY IF EXISTS "Users can manage their own strong workouts" ON public.strong_workouts;
-CREATE POLICY "Users can manage their own strong workouts" 
-ON public.strong_workouts FOR ALL 
-USING (auth.uid() = user_id OR user_id IS NULL)
-WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
-
 DROP POLICY IF EXISTS "Users can manage their own strong workout sets" ON public.strong_workout_sets;
-CREATE POLICY "Users can manage their own strong workout sets" 
-ON public.strong_workout_sets FOR ALL 
-USING (
-    EXISTS (
-        SELECT 1 FROM public.strong_workouts 
-        WHERE id = strong_workout_sets.workout_id AND (user_id = auth.uid() OR user_id IS NULL)
-    )
-    OR NOT EXISTS (
-        SELECT 1 FROM public.strong_workouts WHERE id = strong_workout_sets.workout_id
-    )
-)
-WITH CHECK (true);
+DROP POLICY IF EXISTS own_rows ON public.strong_exercises;
+DROP POLICY IF EXISTS own_rows ON public.strong_workouts;
+DROP POLICY IF EXISTS own_rows ON public.strong_workout_sets;
+CREATE POLICY own_rows ON public.strong_exercises FOR ALL TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+CREATE POLICY own_rows ON public.strong_workouts  FOR ALL TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+-- 4. Tables possédées via leur parent
+CREATE POLICY own_rows ON public.strong_workout_sets FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.strong_workouts w WHERE w.id = strong_workout_sets.workout_id AND w.user_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.strong_workouts w WHERE w.id = strong_workout_sets.workout_id AND w.user_id = auth.uid()));
 
 -- Rattachement automatique de toute séance orpheline au compte connecté
 UPDATE public.strong_workouts SET user_id = auth.uid() WHERE user_id IS NULL;

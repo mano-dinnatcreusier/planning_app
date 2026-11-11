@@ -230,16 +230,15 @@ CREATE TABLE IF NOT EXISTS public.tracker_logs (
 ALTER TABLE public.trackers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tracker_logs ENABLE ROW LEVEL SECURITY;
 
+-- Chaque ligne n'est accessible qu'à son propriétaire connecté
 DROP POLICY IF EXISTS "Users can manage their own trackers" ON public.trackers;
-CREATE POLICY "Users can manage their own trackers" ON public.trackers FOR ALL 
-USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
-
 DROP POLICY IF EXISTS "Users can manage their own tracker logs" ON public.tracker_logs;
-CREATE POLICY "Users can manage their own tracker logs" ON public.tracker_logs FOR ALL 
-USING (
-  EXISTS (SELECT 1 FROM public.trackers WHERE id = tracker_logs.tracker_id AND (user_id = auth.uid() OR user_id IS NULL))
-  OR NOT EXISTS (SELECT 1 FROM public.trackers WHERE id = tracker_logs.tracker_id)
-) WITH CHECK (true);
+DROP POLICY IF EXISTS own_rows ON public.trackers;
+DROP POLICY IF EXISTS own_rows ON public.tracker_logs;
+CREATE POLICY own_rows ON public.trackers FOR ALL TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+CREATE POLICY own_rows ON public.tracker_logs FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.trackers t WHERE t.id = tracker_logs.tracker_id AND t.user_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.trackers t WHERE t.id = tracker_logs.tracker_id AND t.user_id = auth.uid()));
 
 UPDATE public.trackers SET user_id = auth.uid() WHERE user_id IS NULL;`;
 

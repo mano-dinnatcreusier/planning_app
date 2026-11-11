@@ -255,45 +255,56 @@ ALTER TABLE public.strong_exercises ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.strong_workouts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.strong_workout_sets ENABLE ROW LEVEL SECURITY;
 
--- Politiques de sécurité RLS
+-- Politiques de sécurité RLS : chaque ligne n'est accessible qu'à son propriétaire connecté
 DROP POLICY IF EXISTS "Users can manage their own final goals" ON public.final_goals;
-CREATE POLICY "Users can manage their own final goals" ON public.final_goals FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
-
 DROP POLICY IF EXISTS "Users can manage their own milestones" ON public.milestones;
-CREATE POLICY "Users can manage their own milestones" ON public.milestones FOR ALL USING (
-    EXISTS (SELECT 1 FROM public.final_goals WHERE id = milestones.final_goal_id AND (user_id = auth.uid() OR user_id IS NULL))
-    OR NOT EXISTS (SELECT 1 FROM public.final_goals WHERE id = milestones.final_goal_id)
-) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Users can manage their own subtasks" ON public.subtasks;
-CREATE POLICY "Users can manage their own subtasks" ON public.subtasks FOR ALL USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Users can manage their own habits" ON public.habits;
-CREATE POLICY "Users can manage their own habits" ON public.habits FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
-
 DROP POLICY IF EXISTS "Users can manage their own habit logs" ON public.habit_logs;
-CREATE POLICY "Users can manage their own habit logs" ON public.habit_logs FOR ALL USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Users can manage their own trackers" ON public.trackers;
-CREATE POLICY "Users can manage their own trackers" ON public.trackers FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
-
 DROP POLICY IF EXISTS "Users can manage their own tracker logs" ON public.tracker_logs;
-CREATE POLICY "Users can manage their own tracker logs" ON public.tracker_logs FOR ALL USING (
-    EXISTS (SELECT 1 FROM public.trackers WHERE id = tracker_logs.tracker_id AND (user_id = auth.uid() OR user_id IS NULL))
-    OR NOT EXISTS (SELECT 1 FROM public.trackers WHERE id = tracker_logs.tracker_id)
-) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "Users can manage their own strong exercises" ON public.strong_exercises;
-CREATE POLICY "Users can manage their own strong exercises" ON public.strong_exercises FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
-
 DROP POLICY IF EXISTS "Users can manage their own strong workouts" ON public.strong_workouts;
-CREATE POLICY "Users can manage their own strong workouts" ON public.strong_workouts FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
-
 DROP POLICY IF EXISTS "Users can manage their own strong workout sets" ON public.strong_workout_sets;
-CREATE POLICY "Users can manage their own strong workout sets" ON public.strong_workout_sets FOR ALL USING (
-    EXISTS (SELECT 1 FROM public.strong_workouts WHERE id = strong_workout_sets.workout_id AND (user_id = auth.uid() OR user_id IS NULL))
-    OR NOT EXISTS (SELECT 1 FROM public.strong_workouts WHERE id = strong_workout_sets.workout_id)
-) WITH CHECK (true);
+DROP POLICY IF EXISTS own_rows ON public.final_goals;
+DROP POLICY IF EXISTS own_rows ON public.habit_logs;
+DROP POLICY IF EXISTS own_rows ON public.habits;
+DROP POLICY IF EXISTS own_rows ON public.milestones;
+DROP POLICY IF EXISTS own_rows ON public.strong_exercises;
+DROP POLICY IF EXISTS own_rows ON public.strong_workout_sets;
+DROP POLICY IF EXISTS own_rows ON public.strong_workouts;
+DROP POLICY IF EXISTS own_rows ON public.subtasks;
+DROP POLICY IF EXISTS own_rows ON public.tracker_logs;
+DROP POLICY IF EXISTS own_rows ON public.trackers;
+-- 3. Tables possédées directement (colonne user_id)
+CREATE POLICY own_rows ON public.final_goals      FOR ALL TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+CREATE POLICY own_rows ON public.habits           FOR ALL TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+CREATE POLICY own_rows ON public.trackers         FOR ALL TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+CREATE POLICY own_rows ON public.strong_exercises FOR ALL TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+CREATE POLICY own_rows ON public.strong_workouts  FOR ALL TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+-- 4. Tables possédées via leur parent
+CREATE POLICY own_rows ON public.milestones FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.final_goals g WHERE g.id = milestones.final_goal_id AND g.user_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.final_goals g WHERE g.id = milestones.final_goal_id AND g.user_id = auth.uid()));
+
+CREATE POLICY own_rows ON public.subtasks FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.milestones m JOIN public.final_goals g ON g.id = m.final_goal_id
+                      WHERE m.id = subtasks.milestone_id AND g.user_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.milestones m JOIN public.final_goals g ON g.id = m.final_goal_id
+                      WHERE m.id = subtasks.milestone_id AND g.user_id = auth.uid()));
+
+CREATE POLICY own_rows ON public.habit_logs FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.habits h WHERE h.id = habit_logs.habit_id AND h.user_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.habits h WHERE h.id = habit_logs.habit_id AND h.user_id = auth.uid()));
+
+CREATE POLICY own_rows ON public.tracker_logs FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.trackers t WHERE t.id = tracker_logs.tracker_id AND t.user_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.trackers t WHERE t.id = tracker_logs.tracker_id AND t.user_id = auth.uid()));
+
+CREATE POLICY own_rows ON public.strong_workout_sets FOR ALL TO authenticated
+  USING      (EXISTS (SELECT 1 FROM public.strong_workouts w WHERE w.id = strong_workout_sets.workout_id AND w.user_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.strong_workouts w WHERE w.id = strong_workout_sets.workout_id AND w.user_id = auth.uid()));
 
 -- Rattachement automatique de toute séance orpheline au compte connecté
 UPDATE public.strong_workouts SET user_id = auth.uid() WHERE user_id IS NULL;
@@ -914,18 +925,18 @@ CREATE TABLE IF NOT EXISTS strong_workout_sets (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Politiques de sécurité RLS
+-- Politiques de sécurité RLS : chaque ligne n'est accessible qu'à son propriétaire connecté
 DROP POLICY IF EXISTS "Users can manage their own strong exercises" ON strong_exercises;
-CREATE POLICY "Users can manage their own strong exercises" ON strong_exercises FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
-
 DROP POLICY IF EXISTS "Users can manage their own strong workouts" ON strong_workouts;
-CREATE POLICY "Users can manage their own strong workouts" ON strong_workouts FOR ALL USING (auth.uid() = user_id OR user_id IS NULL) WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
-
 DROP POLICY IF EXISTS "Users can manage their own strong workout sets" ON strong_workout_sets;
-CREATE POLICY "Users can manage their own strong workout sets" ON strong_workout_sets FOR ALL USING (
-    EXISTS (SELECT 1 FROM strong_workouts WHERE id = strong_workout_sets.workout_id AND (user_id = auth.uid() OR user_id IS NULL))
-    OR NOT EXISTS (SELECT 1 FROM strong_workouts WHERE id = strong_workout_sets.workout_id)
-) WITH CHECK (true);
+DROP POLICY IF EXISTS own_rows ON strong_exercises;
+DROP POLICY IF EXISTS own_rows ON strong_workouts;
+DROP POLICY IF EXISTS own_rows ON strong_workout_sets;
+CREATE POLICY own_rows ON strong_exercises FOR ALL TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+CREATE POLICY own_rows ON strong_workouts FOR ALL TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+CREATE POLICY own_rows ON strong_workout_sets FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM strong_workouts w WHERE w.id = strong_workout_sets.workout_id AND w.user_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM strong_workouts w WHERE w.id = strong_workout_sets.workout_id AND w.user_id = auth.uid()));
 
 UPDATE strong_workouts SET user_id = auth.uid() WHERE user_id IS NULL;
 UPDATE strong_exercises SET user_id = auth.uid() WHERE user_id IS NULL;
