@@ -320,8 +320,13 @@ def strong_series() -> list[dict]:
         rolling.append([day.isoformat(), float(sum(sets_per_day.get(day - dt.timedelta(days=k), 0) for k in range(7)))])
         day += dt.timedelta(days=1)
     return [
-        {"label": "Séances Strong", "unit": "", "value": sessions_w[monday(t)], "value_label": "cette semaine",
-         "weeks": [[wk.isoformat(), sessions_w[wk]] for wk in weeks]},
+        # Graphique combiné voulu par Mano : bâtons = séances par semaine, courbe (autre couleur, autre échelle)
+        # = séries par semaine, avec les deux chiffres de la semaine en cours. `line` attend son rendu dans Vigie.
+        {"label": "Séances Strong", "unit": "", "value": sessions_w[monday(t)],
+         "value_label": f"semaine {t.isocalendar()[1]}",
+         "weeks": [[wk.isoformat(), sessions_w[wk]] for wk in weeks],
+         "line": {"label": "Séries", "unit": "", "value": sets_w[monday(t)], "value_label": f"semaine {t.isocalendar()[1]}",
+                  "weeks": [[wk.isoformat(), sets_w[wk]] for wk in weeks]}},
         {"label": "Séries Strong", "unit": "", "value": int(rolling[-1][1]) if rolling else 0, "value_label": "7 derniers jours",
          "weeks": [[wk.isoformat(), sets_w[wk]] for wk in weeks], "rolling7": rolling},
     ]
