@@ -284,11 +284,11 @@ def task_metrics() -> list[dict]:
 
 
 def strong_series() -> list[dict]:
-    """Séances et séries Strong par semaine (WEEKS dernières semaines) + séries sur 7 jours glissants.
+    """Séances (bâtons) et séries (courbe) Strong par semaine, sur les WEEKS dernières semaines.
     Une série compte si elle a au moins 1 rep (les lignes « Rest Timer » de l'import Strong sont à 0)."""
     t = today()
     first_week = monday(t) - dt.timedelta(weeks=WEEKS - 1)
-    since = first_week - dt.timedelta(days=6)  # pour la moyenne glissante du premier jour
+    since = first_week
     workouts = rest("GET", "strong_workouts", {"select": "id,date", "date": f"gte.{since.isoformat()}", "order": "date.asc"})
     day_of = {}
     for w in workouts:
@@ -314,21 +314,14 @@ def strong_series() -> list[dict]:
     for d, n in sets_per_day.items():
         if monday(d) in sets_w:
             sets_w[monday(d)] += n
-    rolling = []
-    day = first_week
-    while day <= t:
-        rolling.append([day.isoformat(), float(sum(sets_per_day.get(day - dt.timedelta(days=k), 0) for k in range(7)))])
-        day += dt.timedelta(days=1)
     return [
         # Graphique combiné voulu par Mano : bâtons = séances par semaine, courbe (autre couleur, autre échelle)
-        # = séries par semaine, avec les deux chiffres de la semaine en cours. `line` attend son rendu dans Vigie.
+        # = séries par semaine, avec les deux chiffres de la semaine en cours (rendu par Vigie).
         {"label": "Séances Strong", "unit": "", "value": sessions_w[monday(t)],
          "value_label": f"semaine {t.isocalendar()[1]}",
          "weeks": [[wk.isoformat(), sessions_w[wk]] for wk in weeks],
          "line": {"label": "Séries", "unit": "", "value": sets_w[monday(t)], "value_label": f"semaine {t.isocalendar()[1]}",
                   "weeks": [[wk.isoformat(), sets_w[wk]] for wk in weeks]}},
-        {"label": "Séries Strong", "unit": "", "value": int(rolling[-1][1]) if rolling else 0, "value_label": "7 derniers jours",
-         "weeks": [[wk.isoformat(), sets_w[wk]] for wk in weeks], "rolling7": rolling},
     ]
 
 
