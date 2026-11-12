@@ -52,7 +52,7 @@ interface GoalContextType {
   deleteStrongExercise: (id: string) => Promise<void>;
   addStrongWorkout: (workout: Omit<StrongWorkout, 'id'>) => Promise<{ id: string; rpeDropped: boolean }>;
   deleteStrongWorkout: (id: string) => Promise<void>;
-  importStrongCSVData: (csvContent: string) => Promise<{ workoutsCount: number; exercisesCount: number; savedToCloud: boolean }>;
+  importStrongCSVData: (csvContent: string) => Promise<{ workoutsCount: number; skippedCount: number; exercisesCount: number; savedToCloud: boolean }>;
   // Config & Demo Data
   syncCloudNow: () => Promise<void>;
   saveSupabaseConfig: (url: string, key: string) => Promise<boolean>;
@@ -1875,7 +1875,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const importStrongCSVData = async (csvContent: string) => {
     const lines = csvContent.split(/\r?\n/);
-    if (lines.length <= 1) return { workoutsCount: 0, exercisesCount: 0, savedToCloud: false };
+    if (lines.length <= 1) return { workoutsCount: 0, skippedCount: 0, exercisesCount: 0, savedToCloud: false };
 
     const parseCSVLine = (line: string) => {
       const result: string[] = [];
@@ -1952,7 +1952,26 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
     }
 
+    // Anti-doublons : une séance du CSV déjà présente (même date, même nom) n'est pas réimportée.
+    // On compte par (date, nom) pour garder les vraies séances doubles d'un même jour :
+    // s'il en existe déjà k, les k premières du CSV pour cette clé sont ignorées.
+    const workoutKey = (date: string, name: string) => `${date}|${name.trim().toLowerCase()}`;
+    const keepNew = (existing: { date: string; name: string }[]) => {
+      const remaining = new Map<string, number>();
+      existing.forEach(w => {
+        const k = workoutKey(w.date, w.name || '');
+        remaining.set(k, (remaining.get(k) || 0) + 1);
+      });
+      return Array.from(workoutsMap.values()).filter(w => {
+        const k = workoutKey(w.date, w.name);
+        const left = remaining.get(k) || 0;
+        if (left > 0) { remaining.set(k, left - 1); return false; }
+        return true;
+      });
+    };
+
     const saveLocally = () => {
+      const toImport = keepNew(strongWorkouts);
       const newExercises = [...strongExercises];
       uniqueExerciseNames.forEach(name => {
         if (!newExercises.some(e => e.name.toLowerCase() === name.toLowerCase())) {
@@ -1964,7 +1983,7 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       });
 
-      const newWorkouts: StrongWorkout[] = Array.from(workoutsMap.values()).map(w => ({
+      const newWorkouts: StrongWorkout[] = toImport.map(w => ({
         id: crypto.randomUUID(),
         date: w.date,
         name: w.name,
@@ -1976,97 +1995,75 @@ export const GoalProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setStrongExercises(newExercises);
       setStrongWorkouts(finalAllWorkouts);
       syncStrongToLocalStorage(newExercises, finalAllWorkouts);
+      return { workoutsCount: newWorkouts.length, skippedCount: workoutsMap.size - newWorkouts.length, exercisesCount: uniqueExerciseNames.size, savedToCloud: false };
     };
 
     const supabase = getSupabase();
-    if (supabase && user) {
-      try {
-        const exerciseList = Array.from(uniqueExerciseNames).map(name => ({
-          id: crypto.randomUUID(),
-          name,
-          user_id: user.id,
-          created_at: new Date().toISOString()
-        }));
-        
-        for (let i = 0; i < exerciseList.length; i += 100) {
-          const chunk = exerciseList.slice(i, i + 100);
-          await supabase.from('strong_exercises').upsert(chunk, { onConflict: 'user_id,name' });
-        }
+    if (!supabase || !user) return saveLocally();
 
-        const workoutsList = Array.from(workoutsMap.values()).map(w => ({
-          id: crypto.randomUUID(),
-          date: w.date,
-          name: w.name,
-          user_id: user.id,
-          created_at: new Date().toISOString(),
-          temp_sets: w.sets
-        }));
-
-        const workoutsToInsert = workoutsList.map(w => ({
-          id: w.id,
-          date: w.date,
-          name: w.name,
-          user_id: user.id,
-          created_at: w.created_at
-        }));
-
-        for (let i = 0; i < workoutsToInsert.length; i += 100) {
-          const chunk = workoutsToInsert.slice(i, i + 100);
-          const { error } = await supabase.from('strong_workouts').insert(chunk);
-          if (error) throw error;
-        }
-
-        const setsToInsert: any[] = [];
-        workoutsList.forEach(w => {
-          w.temp_sets.forEach(s => {
-            setsToInsert.push({
-              workout_id: w.id,
-              exercise_name: s.exercise_name,
-              set_order: s.set_order,
-              weight: s.weight,
-              reps: s.reps,
-              created_at: w.created_at
-            });
-          });
-        });
-
-        for (let i = 0; i < setsToInsert.length; i += 500) {
-          const chunk = setsToInsert.slice(i, i + 500);
-          const { error } = await supabase.from('strong_workout_sets').insert(chunk);
-          if (error) throw error;
-        }
-
-        const finalWorkouts: StrongWorkout[] = workoutsList.map(w => ({
-          id: w.id,
-          date: w.date,
-          name: w.name,
-          user_id: w.user_id,
-          created_at: w.created_at,
-          sets: w.temp_sets
-        }));
-
-        const updatedExercises = [...strongExercises];
-        exerciseList.forEach(newEx => {
-          if (!updatedExercises.some(e => e.name.toLowerCase() === newEx.name.toLowerCase())) {
-            updatedExercises.push(newEx);
-          }
-        });
-
-        const finalAllWorkouts = [...finalWorkouts, ...strongWorkouts].sort((a, b) => b.date.localeCompare(a.date));
-        setStrongExercises(updatedExercises);
-        setStrongWorkouts(finalAllWorkouts);
-        syncStrongToLocalStorage(updatedExercises, finalAllWorkouts);
-        return { workoutsCount: workoutsMap.size, exercisesCount: uniqueExerciseNames.size, savedToCloud: true };
-
-      } catch (supabaseErr) {
-        console.error("Bulk insert to Supabase failed, falling back to LocalStorage:", supabaseErr);
-        saveLocally();
-        return { workoutsCount: workoutsMap.size, exercisesCount: uniqueExerciseNames.size, savedToCloud: false };
-      }
-    } else {
-      saveLocally();
-      return { workoutsCount: workoutsMap.size, exercisesCount: uniqueExerciseNames.size, savedToCloud: false };
+    // Connecté : la base est la référence, on la relit entièrement (date et nom suffisent).
+    const existing: { date: string; name: string }[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase.from('strong_workouts').select('date,name').order('id').range(from, from + 999);
+      if (error) throw new Error(`Impossible de vérifier les séances déjà présentes : ${error.message}`);
+      existing.push(...(data || []));
+      if (!data || data.length < 1000) break;
     }
+    const toImport = keepNew(existing);
+    const skippedCount = workoutsMap.size - toImport.length;
+
+    const exerciseList = Array.from(uniqueExerciseNames).map(name => ({
+      id: crypto.randomUUID(),
+      name,
+      user_id: user.id,
+      created_at: new Date().toISOString()
+    }));
+    for (let i = 0; i < exerciseList.length; i += 100) {
+      await supabase.from('strong_exercises').upsert(exerciseList.slice(i, i + 100), { onConflict: 'user_id,name', ignoreDuplicates: true });
+    }
+
+    // Par paquets : séances puis leurs séries ; si les séries échouent, on retire les séances du paquet,
+    // pour ne jamais laisser de séance vide. Relancer l'import reprend là où il s'est arrêté.
+    const finalWorkouts: StrongWorkout[] = [];
+    for (let i = 0; i < toImport.length; i += 50) {
+      const chunk = toImport.slice(i, i + 50).map(w => ({
+        id: crypto.randomUUID(),
+        date: w.date,
+        name: w.name,
+        user_id: user.id,
+        created_at: new Date().toISOString(),
+        sets: w.sets
+      }));
+      const { error: wErr } = await supabase.from('strong_workouts')
+        .insert(chunk.map(({ sets: _sets, ...w }) => w));
+      if (wErr) throw new Error(`Import interrompu après ${finalWorkouts.length} séances : ${wErr.message}. Relancez l'import pour reprendre.`);
+      const setsRows = chunk.flatMap(w => w.sets.map(s => ({
+        workout_id: w.id,
+        exercise_name: s.exercise_name,
+        set_order: s.set_order,
+        weight: s.weight,
+        reps: s.reps,
+        created_at: w.created_at
+      })));
+      const { error: sErr } = await supabase.from('strong_workout_sets').insert(setsRows);
+      if (sErr) {
+        await supabase.from('strong_workouts').delete().in('id', chunk.map(w => w.id));
+        throw new Error(`Import interrompu après ${finalWorkouts.length} séances : ${sErr.message}. Relancez l'import pour reprendre.`);
+      }
+      finalWorkouts.push(...chunk);
+    }
+
+    const updatedExercises = [...strongExercises];
+    exerciseList.forEach(newEx => {
+      if (!updatedExercises.some(e => e.name.toLowerCase() === newEx.name.toLowerCase())) {
+        updatedExercises.push(newEx);
+      }
+    });
+    const finalAllWorkouts = [...finalWorkouts, ...strongWorkouts].sort((a, b) => b.date.localeCompare(a.date));
+    setStrongExercises(updatedExercises);
+    setStrongWorkouts(finalAllWorkouts);
+    syncStrongToLocalStorage(updatedExercises, finalAllWorkouts);
+    return { workoutsCount: finalWorkouts.length, skippedCount, exercisesCount: uniqueExerciseNames.size, savedToCloud: true };
   };
 
   return (
