@@ -14,7 +14,8 @@ Exemples :
   planning tasks done 3                  # 3 = numéro dans la liste du jour, S2 = 2e tâche de la semaine
   planning goals list
   planning metrics                       # report des tâches + carte Vigie ~/.local/state/vigie/metrics/planning.json
-  planning strava connect                # une fois : relier Strava (lecture seule) pour les km de course
+  planning strava web-login              # une fois : relier Strava (session web, lecture seule) pour les km de course
+  planning strava connect                # idem par l'API officielle (abonnement Strava requis)
 """
 from __future__ import annotations
 
@@ -46,6 +47,12 @@ STRAVA_CONFIG = Path(os.environ.get("PLANNING_STRAVA_CONFIG", Path.home() / ".co
 STRAVA_WEB = os.environ.get("PLANNING_STRAVA_WEB", "https://www.strava.com")         # autorisation et jetons
 STRAVA_API = os.environ.get("PLANNING_STRAVA_API", "https://www.strava.com/api/v3")  # données
 RUN_TYPES = {"Run", "TrailRun", "VirtualRun"}
+# Strava sans API (réservée aux abonnés depuis juin 2026) : la session web de Mano, lue sur strava.com
+STRAVA_WEB_CONFIG = Path(os.environ.get("PLANNING_STRAVA_WEB_CONFIG", Path.home() / ".config/vigie/strava_web.json"))
+STRAVA_WEB_CACHE = Path(os.environ.get("PLANNING_STRAVA_WEB_CACHE", Path.home() / ".local/state/vigie/strava_web_cache.json"))
+STRAVA_WEB_EVERY = 3600  # une lecture du site par heure au plus
+STRAVA_BROWSER_IMAGE = "lscr.io/linuxserver/chromium:latest"
+BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 APP_URL = "https://mano-dinnatcreusier.github.io/planning_app/"
 EMAIL_DOMAIN = "planning.app"  # même règle que l'app : un identifiant sans @ devient <id>@planning.app
 LOGIN_PORT = 8766
@@ -396,13 +403,17 @@ def strava_runs(since: dt.date) -> list[dict]:
 
 
 def run_series() -> dict | None:
-    """Km de course par semaine (Strava). None si Strava n'est pas relié : Vigie garde alors son exemple."""
-    if not STRAVA_CONFIG.exists():
+    """Km de course par semaine (Strava : API si reliée, sinon session web). None si rien n'est relié."""
+    if STRAVA_CONFIG.exists():
+        fetch = strava_runs
+    elif STRAVA_WEB_CONFIG.exists():
+        fetch = strava_web_runs_cached
+    else:
         return None
     t = today()
     first_week = monday(t) - dt.timedelta(weeks=WEEKS - 1)
     km_day: dict[dt.date, float] = {}
-    for r in strava_runs(first_week - dt.timedelta(days=6)):
+    for r in fetch(first_week - dt.timedelta(days=6)):
         km_day[r["date"]] = km_day.get(r["date"], 0.0) + r["km"]
     weeks = [first_week + dt.timedelta(weeks=k) for k in range(WEEKS)]
     km_w = {wk: 0.0 for wk in weeks}
@@ -415,6 +426,214 @@ def run_series() -> dict | None:
         day += dt.timedelta(days=1)
     return {"label": "Course à pied", "unit": "km", "value": round(km_w[monday(t)], 1), "value_label": "cette semaine",
             "weeks": [[wk.isoformat(), round(km_w[wk], 1)] for wk in weeks], "rolling7": rolling}
+
+
+class StravaSessionExpired(PlanningError):
+    pass
+
+
+def strava_web_get(path: str, cookies: dict) -> tuple[object, dict]:
+    """GET JSON sur strava.com avec la session web. Renvoie (données, cookies mis à jour)."""
+    req = urllib.request.Request(f"{STRAVA_WEB}{path}", headers={
+        "User-Agent": BROWSER_UA, "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest", "Accept-Language": "fr-FR,fr;q=0.9",
+        "Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items())})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw, final, ctype = r.read(), r.geturl(), r.headers.get("Content-Type", "")
+            for c in r.headers.get_all("Set-Cookie") or []:
+                name, _, rest_ = c.partition("=")
+                value = rest_.split(";", 1)[0]
+                if name and value and "expires=Thu, 01 Jan 1970" not in c:
+                    cookies = {**cookies, name.strip(): value}
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise StravaSessionExpired("session Strava expirée : relancer `planning strava web-login`")
+        raise PlanningError(f"Strava {e.code} : " + ("limite de requêtes atteinte" if e.code == 429 else str(e.reason)))
+    except urllib.error.URLError as e:
+        raise PlanningError(f"Strava injoignable : {e.reason}")
+    if "/login" in urllib.parse.urlparse(final).path or "json" not in ctype:
+        raise StravaSessionExpired("session Strava expirée : relancer `planning strava web-login`")
+    try:
+        return json.loads(raw), cookies
+    except ValueError:
+        raise PlanningError("réponse Strava inattendue (pas du JSON) : le site a peut-être changé")
+
+
+def _web_activity(a: dict) -> dict | None:
+    """Une ligne de « Mes activités » → {"date", "km"} si c'est une course. Tolérant aux variantes du site."""
+    kind = a.get("sport_type") or a.get("type") or a.get("activity_type") or ""
+    if kind not in RUN_TYPES:
+        return None
+    d = None
+    if a.get("start_date_local_raw"):
+        try:
+            d = dt.datetime.fromtimestamp(int(a["start_date_local_raw"]), dt.timezone.utc).date()  # heure locale codée en epoch
+        except (TypeError, ValueError):
+            pass
+    if d is None:
+        for key in ("start_date_local", "start_time", "start_date"):
+            if a.get(key):
+                try:
+                    d = dt.date.fromisoformat(str(a[key])[:10])
+                    break
+                except ValueError:
+                    continue
+    if d is None:
+        return None
+    if a.get("distance_raw") is not None:
+        km = float(a["distance_raw"]) / 1000
+    else:
+        try:
+            km = float(str(a.get("distance", "0")).replace(" ", "").replace(" ", "").replace(",", "."))
+        except ValueError:
+            return None
+        if km > 500:  # en mètres
+            km /= 1000
+    return {"date": d, "km": km}
+
+
+def strava_web_runs(since: dt.date) -> list[dict]:
+    """Courses depuis `since`, lues dans « Mes activités » de strava.com (activités manuelles comprises)."""
+    try:
+        cfg = json.loads(STRAVA_WEB_CONFIG.read_text())
+    except FileNotFoundError:
+        raise PlanningError("Strava pas encore relié : lancer `planning strava web-login`")
+    cookies, runs = cfg["cookies"], []
+    for page in range(1, 31):
+        q = urllib.parse.urlencode({"keywords": "", "activity_type": "Run", "workout_type": "", "commute": "",
+                                    "private_activities": "", "trainer": "", "gear": "", "new_activity_only": "false",
+                                    "order": "start_date_local DESC", "page": page, "per_page": 20})
+        data, cookies = strava_web_get(f"/athlete/training_activities?{q}", cookies)
+        models = data.get("models", []) if isinstance(data, dict) else data
+        if not isinstance(models, list):
+            raise PlanningError("réponse Strava inattendue : le site a peut-être changé")
+        oldest = None
+        for a in models:
+            r = _web_activity(a) if isinstance(a, dict) else None
+            if r:
+                oldest = r["date"] if oldest is None else min(oldest, r["date"])
+                if r["date"] >= since:
+                    runs.append(r)
+        if len(models) < 20 or (oldest and oldest < since):
+            break
+        time.sleep(1)
+    if cookies != cfg["cookies"]:
+        save_private(STRAVA_WEB_CONFIG, {**cfg, "cookies": cookies})
+    return runs
+
+
+def strava_web_runs_cached(since: dt.date) -> list[dict]:
+    """Au plus une lecture du site par heure ; entre deux, le dernier résultat sert."""
+    try:
+        cache = json.loads(STRAVA_WEB_CACHE.read_text())
+    except (FileNotFoundError, ValueError):
+        cache = {}
+    if time.time() - cache.get("fetched_at", 0) < STRAVA_WEB_EVERY and cache.get("since", "9999") <= since.isoformat():
+        if cache.get("error"):  # dernier essai raté il y a moins d'une heure : on ne réessaie pas tout de suite
+            raise (StravaSessionExpired if cache.get("expired") else PlanningError)(cache["error"])
+        return [{"date": dt.date.fromisoformat(r["date"]), "km": r["km"]} for r in cache["runs"]
+                if r["date"] >= since.isoformat()]
+    try:
+        runs = strava_web_runs(since)
+    except PlanningError as e:
+        save_private(STRAVA_WEB_CACHE, {"fetched_at": time.time(), "since": since.isoformat(), "runs": [],
+                                        "error": str(e), "expired": isinstance(e, StravaSessionExpired)})
+        raise
+    save_private(STRAVA_WEB_CACHE, {"fetched_at": time.time(), "since": since.isoformat(),
+                                    "runs": [{"date": r["date"].isoformat(), "km": round(r["km"], 3)} for r in runs]})
+    return runs
+
+
+def chromium_cookies(profile: Path, domain: str = "strava.com") -> dict:
+    """Cookies d'un profil Chromium Linux sans trousseau (chiffrement v10, clé « peanuts »)."""
+    import hashlib
+    import shutil
+    import sqlite3
+    import subprocess
+    import tempfile
+    db = profile / ".config/chromium/Default/Cookies"
+    if not db.exists():
+        return {}
+    with tempfile.TemporaryDirectory(dir=profile) as tmp:
+        copy = Path(tmp) / "c.db"
+        shutil.copy(db, copy)
+        for ext in ("-wal", "-journal"):
+            if Path(str(db) + ext).exists():
+                shutil.copy(str(db) + ext, str(copy) + ext)
+        con = sqlite3.connect(copy)
+        rows = con.execute("SELECT host_key, name, value, encrypted_value FROM cookies WHERE host_key LIKE ?",
+                           (f"%{domain}",)).fetchall()
+        version = int((con.execute("SELECT value FROM meta WHERE key='version'").fetchone() or [0])[0])
+        con.close()
+    key = hashlib.pbkdf2_hmac("sha1", b"peanuts", b"saltysalt", 1, 16)
+    out = {}
+    for host, name, value, enc in rows:
+        if value:
+            out[name] = value
+            continue
+        if enc[:3] != b"v10":
+            continue
+        p = subprocess.run(["openssl", "enc", "-d", "-aes-128-cbc", "-K", key.hex(), "-iv", "20" * 16],
+                           input=enc[3:], capture_output=True)
+        if p.returncode:
+            continue
+        plain = p.stdout[32:] if version >= 24 else p.stdout  # préfixe : empreinte du domaine
+        out[name] = plain.decode(errors="replace")
+    return out
+
+
+def cmd_strava_web_login(a):
+    """Ouvre un Chromium sur le mini-PC, pilotable depuis le téléphone (Tailscale) : Mano s'y connecte lui-même à
+    Strava (captcha, code par e-mail), puis l'outil garde la session et éteint tout."""
+    import subprocess
+    import shutil
+    ip = a.host or tailscale_ip()
+    shown = tailscale_name() or ip
+    profile = Path.home() / ".cache/planning/strava-browser"
+    shutil.rmtree(profile, ignore_errors=True)
+    profile.mkdir(parents=True, mode=0o700)
+    pw = secrets.token_urlsafe(9)
+    name = "planning-strava-login"
+    subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+    run = subprocess.run(["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=2500M",
+                          "docker", "run", "-d", "--name", name, "--memory=2500m", "--shm-size=1g",
+                          "-e", f"PUID={os.getuid()}", "-e", f"PGID={os.getgid()}", "-e", "TZ=Europe/Paris",
+                          "-e", "CUSTOM_USER=mano", "-e", f"PASSWORD={pw}", "-e", "LC_ALL=fr_FR.UTF-8",
+                          "-e", f"CHROME_CLI={STRAVA_WEB}/login", "-p", f"{ip}:{a.port}:3001",
+                          "-v", f"{profile}:/config", STRAVA_BROWSER_IMAGE], capture_output=True, text=True)
+    if run.returncode:
+        raise PlanningError(f"navigateur distant impossible à lancer : {run.stderr.strip()[:200]}")
+    try:
+        print(f"Ouvre sur ton téléphone (Tailscale) : https://{shown}:{a.port}/", flush=True)
+        print(f"Identifiant : mano   Mot de passe : {pw}", flush=True)
+        print("(alerte de certificat attendue : continuer quand même ; "
+              f"puis connecte-toi à Strava dans le navigateur affiché ; {a.timeout // 60} min)", flush=True)
+        deadline, tried = time.time() + a.timeout, None
+        while time.time() < deadline:
+            time.sleep(15)
+            cookies = chromium_cookies(profile)
+            if not cookies or cookies == tried:
+                continue
+            tried = cookies
+            try:
+                data, cookies = strava_web_get("/athlete/training_activities?page=1&per_page=20", cookies)
+            except StravaSessionExpired:
+                continue  # pas encore connecté
+            save_private(STRAVA_WEB_CONFIG, {"cookies": cookies, "saved_at": time.time()})
+            models = data.get("models", []) if isinstance(data, dict) else data
+            keys = sorted(models[0].keys()) if models and isinstance(models[0], dict) else []
+            print(f"Strava relié (session web). {len(models)} activités sur la 1re page.", flush=True)
+            if a.debug:
+                print("champs :", keys)
+            break
+        else:
+            raise PlanningError("délai dépassé, Strava pas relié")
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+        shutil.rmtree(profile, ignore_errors=True)
+    STRAVA_WEB_CACHE.unlink(missing_ok=True)
+    after_change()
 
 
 STRAVA_PAGE = """<!doctype html><html lang="fr"><head><meta charset="utf-8">
@@ -517,7 +736,7 @@ def cmd_strava_connect(a):
 def cmd_strava_status(a):
     s = run_series()
     if s is None:
-        print("Strava pas encore relié : `planning strava connect`")
+        print("Strava pas encore relié : `planning strava web-login`")
         return
     print(f"Strava relié. Course à pied : {s['value']} km cette semaine ; 16 semaines : {[w[1] for w in s['weeks']]}")
 
@@ -540,6 +759,10 @@ def refresh_card() -> dict:
         runs = run_series()  # 3e série : km de course (Strava), absente tant que Strava n'est pas relié
         if runs and series:
             series.append(runs)
+    except StravaSessionExpired as e:
+        metrics.append({"label": "Strava", "value": "à reconnecter", "tone": "bad",
+                        "detail": "session expirée : demander à Claude `planning strava web-login`"})
+        print(f"planning : {e}", file=sys.stderr)
     except PlanningError as e:
         print(f"planning : {e}", file=sys.stderr)  # Strava en panne ne bloque pas le reste de la carte
     if errors and not metrics and not series:
@@ -919,6 +1142,10 @@ def main(argv=None) -> int:
     x.add_argument("--host"); x.add_argument("--public-host", default=os.environ.get("PLANNING_LOGIN_HOST"))
     x.add_argument("--port", type=int, default=LOGIN_PORT); x.add_argument("--timeout", type=int, default=1200)
     x.set_defaults(fn=cmd_strava_connect)
+    x = sv.add_parser("web-login", help="relier Strava sans API : se connecter à strava.com depuis le téléphone")
+    x.add_argument("--host"); x.add_argument("--port", type=int, default=8768)
+    x.add_argument("--timeout", type=int, default=3600); x.add_argument("--debug", action="store_true")
+    x.set_defaults(fn=cmd_strava_web_login)
     sv.add_parser("status", help="vérifier Strava et afficher les km par semaine").set_defaults(fn=cmd_strava_status)
 
     a = p.parse_args(argv)
